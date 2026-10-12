@@ -49,7 +49,9 @@ D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路
 请先阅读 README.md 和 docs 下的核心文档。
 
 实施顺序：
-M0 Python 服务骨架 -> M1 真实研究 Agent -> M2 Java 与网页 -> M3 研究积累与特色功能。
+M0 完整应用骨架 -> M1 真实研究 Agent -> M2 研究积累与资料完善 -> M3 特色功能。
+M0 内部顺序：Python 演示接口 -> Java 启动与调用 -> 网页输入与展示。
+完整骨架可用后再接真实模型和资料工具。
 
 本次任务由用户填写；用户明确要求实施后执行：
 【填写任务编号和目标】

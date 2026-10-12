@@ -55,7 +55,9 @@ D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路\docs\design-style.md�
 
 ## 当前实施顺序与范围
 
-2026-10-12 已核对并统一顺序：M0 服务骨架 → M1 真实研究 Agent → M2 Java 与网页 → M3 研究积累与特色功能。
+2026-10-12 用户已确认顺序：M0 完整应用骨架 → M1 真实研究 Agent → M2 研究积累与资料完善 → M3 特色功能。
+
+M0 依次完成 Python 演示服务、Java 调用、网页展示；先看到完整应用，再接真实研究能力。此前把真实 Agent 提到 Java 和网页之前的顺序已修正，三应用架构和原产品逻辑保持不变。
 
 当前功能任务为 M0-1，范围见 `docs/first-step.md`。用户本轮只要求检查、规划、更新文档和保存 Git；功能实现保持待做。用户之后明确要求实施某个任务时，该请求就是本任务的执行依据，不需要重复要求确认。
 
@@ -89,3 +91,15 @@ D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路\docs\design-style.md�
 - `docs/task-board.md` 是任务队列。
 - `docs/architecture.md` 是架构约束。
 - 如果新聊天框不知道上下文，先让它读这些文档，不要靠口头补充一大段。
+
+## 实施依据与文档分工
+
+| 文档 | 指导什么 |
+| --- | --- |
+| `docs/architecture.md` | 职责边界：网页、Java、Python 各自做什么 |
+| `docs/task-board.md` | 已确定的任务顺序和下一项任务 |
+| `docs/current-state.md` | 实际完成内容、检查结果与待做状态 |
+| `docs/first-step.md` | M0-1 的接口、字段、文件范围和验收标准 |
+| `README.md` | 项目入口与概要，详细执行以对应任务规格为准 |
+
+当前采用原设计的完整应用最小闭环，并保留新增的接口与验收细节。整理文档不应直接替换既定开发顺序；新的路线想法先说明理由和影响，再按用户确定的方向同步任务板。
