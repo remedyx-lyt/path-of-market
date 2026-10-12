@@ -1,52 +1,64 @@
 # 当前进度
 
-## 已完成
+更新时间：2026-10-12（Australia/Sydney）。
 
-- 创建项目目录：`Path of Market市场之路`。
-- 确定项目定位：个人金融研究操作台，不做荐股和自动交易。
-- 确定主模块：用户画像、板块地图、深研室、追猎者、锐眼、研究日志、数据层。
-- 确定技术路线：React 前端 + Java Spring Boot 主后端 + Python FastAPI Agent 服务。
-- 调整应用目录：
-  - `apps/web`：前端。
-  - `apps/server`：Java 主后端。
-  - `apps/agent`：Python Agent 服务。
-- 采用 PoE2 官方/常见命名：
-  - `Deadeye / 锐眼`：个性化信号发现。
-  - `Pathfinder / 追猎者`：持续追踪变化。
-- 创建基础文档：
-  - `README.md`
-  - `docs/product-plan.md`
-  - `docs/agent-concepts.md`
-  - `docs/data-sources.md`
-- 确定前端风格方向：黑白极简、高对比、大留白、强字体、工具感，参考 Easy Farm 页面风格。
-- 新增 `docs/design-style.md` 作为后续前端任务的设计约束。
-- 记录深研室的研究报告预兆设计：
-  - 崇高预兆：深入解读。
-  - 远古预兆：历史参照。
-  - 机遇预兆：未来变化。
-  - 深渊回响预兆：风险端。
-  - 详细设计见 `docs/report-omens.md`。
-- 已补充研究报告预兆的第一版完整约束，包括每个预兆的核心目标、适用场景、资料偏好、任务拆解要求、报告章节要求、关键问题清单、自检标准和禁止事项。
+## 当前状态
 
-## 当前正在做
+本轮任务：完整核对原有 12 份 Markdown，统一架构与第一步范围，建立本地 Git 并保存记录。当前只进行文档和版本管理工作；用户尚未要求执行第一步业务实现。
 
-- 建立跨聊天框协作工作流。
-- 补齐共享项目记忆文档。
-- 准备开始第一阶段最小闭环。
+**下一项功能任务：M0-1 Python 研究服务骨架。状态为待用户明确要求执行。**
+
+## 已完成的规划与准备
+
+- 项目目录：`D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路`。
+- 产品定位：本地网页财经研究工作台，内部包含研究 Agent；用于资料积累、变化比较和不同视角的研究。
+- 应用分工：React + Vite + TypeScript 前端、Java Spring Boot 主后端、Python FastAPI 研究服务。
+- 主模块：用户画像、板块地图、深研室、追猎者、锐眼、研究日志、数据层。
+- 模块命名：`Deadeye / 锐眼`、`Pathfinder / 追猎者`。
+- 四个研究预兆及完整研究规格已写入 `report-omens.md`：崇高、远古、机遇、深渊回响。
+- 前端设计方向：黑白极简、高对比、大留白、强字体；参考图已保存在 `docs/assets/easy-farm-style-reference.png`。
+- 研究 Agent 的动态工具循环和验收要求已写入 `architecture.md`、`agent-concepts.md`、`task-board.md`。
+- 实施顺序已统一为 M0 服务骨架、M1 真实 Agent、M2 Java 与网页、M3 持久化与特色功能。
+- 创建 `first-step.md`，说明第一步范围、数据格式和验收标准。
+- 创建 `git-workflow.md`，说明本地版本保存和未来 GitHub 接入。
+
+## 实际代码与环境
+
+| 项目 | 检查结果 |
+| --- | --- |
+| Python 入口 | `apps/agent/app/main.py` 仍为占位说明，尚无 FastAPI 应用或接口 |
+| Python 环境 | `apps/agent/.venv` 已建立，已安装 FastAPI、Pydantic、Uvicorn 等依赖 |
+| Python 验证 | 尚未启动应用或完成 HTTP 接口验证；环境准备不等于服务完成 |
+| Java 入口 | `Application.java` 仍为空类，尚无 Spring Boot 启动实现或构建配置 |
+| 网页 | 只有目录占位，尚无可运行的 React 工程 |
+| 模型与工具 | 尚未接入真实模型、文档检索、行情查询或研究循环 |
+| 服务运行 | 没有由本次任务启动的研究服务 |
+
+此前开始的环境准备命令已完成；用户要求暂缓第一步后，没有修改业务源码或启动服务。依赖清单和可复现启动脚本将在 M0-1 中补齐。
+
+## Git 状态
+
+- 已在项目目录初始化本地仓库，分支为 `main`。
+- 原有规划与目录骨架已保存为基线提交 `09eb2b1`。
+- 本轮文档更新另作一个提交；提交标识以 `git log` 为准，避免在文档中记录自身提交哈希。
+- `.gitignore` 排除虚拟环境、密钥文件、构建缓存、上传资料、向量索引、研究运行结果和本地数据库。
+- `.env.example`、源代码、项目文档和前端设计参考图纳入版本管理。
+- 尚未创建 GitHub 仓库，尚未配置 remote，也未推送。
 
 ## 下一步
 
-1. 搭建 Python Agent hello world。
-2. 搭建 Java Server hello world。
-3. 实现 Java 调 Python 的 mock research 接口。
-4. 搭建 React 前端 hello world。
-5. 前端调用 Java 并展示 mock 研究报告。
-6. 更新启动说明和开发记录。
+1. 用户明确要求执行后，实施 `first-step.md` 中的 M0-1。
+2. 验证真实启动、健康检查、演示研究输入输出和无效输入处理。
+3. 更新本文件和 `task-board.md`，检查改动并创建功能提交。
+4. 继续 M1：接入真实模型和少量资料工具，验证动态研究循环。
+5. 接入 Java、网页，再逐步加入研究记录、用户画像、追猎者和锐眼。
 
 ## 当前约定
 
-- 项目内说明、页面文案、注释尽量使用中文。
-- 代码文件名、目录名、类名、函数名优先使用英文。
-- 每次新任务先读项目文档，再动代码。
-- 每次完成任务后更新本文件和 `docs/task-board.md`。
-- 涉及前端页面和组件时，必须先读 `docs/design-style.md`。
+- 项目说明、页面文案和必要注释尽量使用中文；代码标识优先使用英文。
+- 已有 React、Java、Python 分工继续作为架构边界。
+- 每次只完成一个明确任务；完成情况按实际检查结果记录。
+- 用户要求只规划或等待时，只进行当前已授权的工作。
+- 每个功能任务完成后及时更新本文件和 `task-board.md`，并保存相应 Git 提交。
+- 涉及前端时先读 `design-style.md`。
+- M0 演示报告和 M1 真实 Agent 分开验收，不虚构工具执行、来源或预兆覆盖情况。

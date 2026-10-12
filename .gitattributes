@@ -1,0 +1,9 @@
+# 统一文本换行；Windows 启动脚本保留 CRLF。
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary

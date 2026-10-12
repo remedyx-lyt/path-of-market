@@ -15,6 +15,8 @@ D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路
 - docs/agent-concepts.md
 - docs/current-state.md
 - docs/task-board.md
+- docs/first-step.md（如果本次是 M0-1）
+- docs/git-workflow.md
 - docs/design-style.md（如果本次涉及前端 UI）
 
 项目基本架构：
@@ -31,10 +33,12 @@ D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路
 - 先探索和说明方案，再修改。
 - 完成后运行可行的检查。
 - 完成后更新 docs/current-state.md 和 docs/task-board.md。
+- 检查改动，将本任务的代码和相关文档保存为 Git 提交，并报告提交标识。
+- 功能任务是否实施，以用户当前明确请求为准；只规划时保持待做。
 - 如果涉及前端 UI，遵守 docs/design-style.md 的黑白极简工具风格。
 ```
 
-## 最小闭环任务版本
+## 第一阶段任务版本
 
 ```text
 请作为 Path of Market（市场之路）项目的开发助手工作。
@@ -44,12 +48,18 @@ D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路
 
 请先阅读 README.md 和 docs 下的核心文档。
 
-当前里程碑是“最小闭环”：
-前端 -> Java 主后端 -> Python Agent 服务 -> Java -> 前端。
+实施顺序：
+M0 Python 服务骨架 -> M1 真实研究 Agent -> M2 Java 与网页 -> M3 研究积累与特色功能。
 
-这次只做一个任务：
-【填写：Python Agent hello world / Java Server hello world / Java 调 Python / 前端展示 mock 报告】
+本次任务由用户填写；用户明确要求实施后执行：
+【填写任务编号和目标】
 
-不要接真实 LLM，不要做 RAG，不要做数据库。先把链路打通。
-完成后更新 docs/current-state.md 和 docs/task-board.md。
+如果本次任务是 M0-1：
+先读 docs/first-step.md，只实现 Python 健康检查、mock 研究接口和启动说明。
+不要接真实 LLM、资料检索、数据库、Java 或前端。
+如果用户本次只要求检查或规划，不进行业务实现。
+
+M1 的真实 Agent 任务必须单独验证模型选择工具、依据结果补查或结束；不虚构来源或工具记录。
+
+完成后运行对应检查，更新 docs/current-state.md 和 docs/task-board.md，检查 Git diff 并提交本任务改动。
 ```
