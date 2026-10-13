@@ -6,11 +6,32 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 ## 当前状态
 
-截至 2026-10-12，项目处于规划和目录骨架阶段。Python、Java 入口仍是占位文件，前端尚未建立可运行工程。Python 虚拟环境和基础依赖已准备，但没有实现服务接口。
+截至 2026-10-13，M0-1 Python 研究服务骨架已完成并通过实际 HTTP 检查。Java 入口仍是占位文件，前端尚未建立可运行工程，整个应用最小闭环尚未完成。
 
-已初始化本地 Git，分支为 `main`。GitHub 仓库尚未创建，也没有配置远程地址。
+已初始化本地 Git，分支为 `main`。当前没有配置远程地址，代码和提交先保存在本地。
 
-当前等待用户明确要求执行第一步；本轮只更新文档和保存 Git 记录。第一步的范围见 `docs/first-step.md`。
+当前下一项为 M0-2 Java 主后端启动。Python 的演示服务只验证请求与报告格式，尚未接入真实模型、资料或研究 Agent。
+
+## 启动 Python 研究服务
+
+在 PowerShell 中执行：
+
+```powershell
+Set-Location 'D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路'
+.\scripts\start-agent.ps1
+```
+
+服务启动后打开 `http://127.0.0.1:8000/docs`，可以查看接口，并在 `POST /research/mock` 中点击 **Try it out**、**Execute** 发送示例请求。服务根地址也会跳转到接口文档。
+
+另开一个终端检查接口：
+
+```powershell
+.\apps\agent\.venv\Scripts\python.exe .\scripts\check-agent.py
+```
+
+启动脚本自动定位项目和虚拟环境，第一次缺少环境或依赖时会安装 `apps/agent/requirements.txt`。已有环境需要重装锁定版本时使用 `-InstallDependencies`，开发时可使用 `-Reload`，指定端口用 `-Port 8001`。按 Ctrl+C 停止服务。
+
+详细请求示例、字段限制和验证结果见 `docs/first-step.md`。
 
 ## 第一版功能
 

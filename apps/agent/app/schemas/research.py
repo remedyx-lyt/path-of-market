@@ -1,0 +1,74 @@
+"""研究接口的数据约定；对外 JSON 使用 userStyle、isMock、toolCalls。"""
+
+from enum import Enum
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ReportOmen(str, Enum):
+    EXALTED = "exalted"
+    ANCIENT = "ancient"
+    OPPORTUNITY = "opportunity"
+    ABYSSAL_ECHOES = "abyssal_echoes"
+
+
+class ResearchRequest(BaseModel):
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "target": "示例公司",
+                    "question": "如何研究它的研发投入变化？",
+                    "userStyle": "关注长期增长和风险验证",
+                    "omens": ["opportunity", "abyssal_echoes"],
+                }
+            ]
+        },
+    )
+
+    target: str = Field(
+        min_length=1, max_length=120, strict=True, description="公司或板块名称"
+    )
+    question: str = Field(
+        min_length=1, max_length=2000, strict=True, description="本次研究问题"
+    )
+    user_style: str = Field(
+        default="", alias="userStyle", max_length=500, strict=True,
+        description="可选研究偏好",
+    )
+    omens: list[ReportOmen] = Field(
+        default_factory=list, max_length=4, strict=True,
+        description="可选研究预兆，本阶段只接收与展示",
+    )
+
+
+class HealthResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    service: Literal["agent"] = "agent"
+    mode: Literal["mock"] = "mock"
+
+
+class ReportSection(BaseModel):
+    heading: str
+    content: str
+
+
+class MockResearchReport(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    mode: Literal["mock"] = "mock"
+    is_mock: Literal[True] = Field(default=True, alias="isMock")
+    target: str
+    question: str
+    user_style: str = Field(alias="userStyle")
+    omens: list[ReportOmen]
+    title: str
+    summary: str
+    sections: list[ReportSection]
+    sources: list[str] = Field(default_factory=list, max_length=0)
+    tool_calls: list[dict[str, str]] = Field(
+        default_factory=list, max_length=0, alias="toolCalls"
+    )
