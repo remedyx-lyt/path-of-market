@@ -6,11 +6,33 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 ## 当前状态
 
-截至 2026-10-13，M0-1 Python 研究服务骨架、M0-2 Java 主后端启动、M0-3 Java 调用 Python 均已完成并通过实际 HTTP 检查。Java 可将研究请求交给 Python，并返回演示报告；前端工程仍待实现，整个应用最小闭环尚未完成。
+截至 2026-10-13，M0-1 Python 服务、M0-2 Java 启动、M0-3 Java 调用 Python、M0-4 React 页面均已完成。网页可以填写并预览研究任务；Java 与 Python 已能通过接口返回演示报告。网页报告接入仍待 M0-5，整个应用最小闭环尚未完成。
 
 已初始化本地 Git，分支为 `main`。当前没有配置远程地址，代码和提交先保存在本地。
 
-当前下一项为 M0-4 React 页面启动，随后 M0-5 在网页展示演示报告。Python 的演示服务只验证请求与报告格式，尚未接入真实模型、资料或研究 Agent。
+当前下一项为 M0-5：网页调用 Java 并展示演示报告。Python 的演示服务只验证请求与报告格式，尚未接入真实模型、资料或研究 Agent。
+
+## 打开深研室网页
+
+在 PowerShell 中执行：
+
+```powershell
+Set-Location 'D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路'
+.\scripts\start-web.ps1
+```
+
+打开 `http://127.0.0.1:5173`。网页支持填写研究对象、问题，展开研究偏好与四个预兆，填入示例、清空和预览任务。当前的“预览研究任务”只更新页面内的任务摘要，不调用后端、不生成报告；M0-5 再接报告接口。
+
+首次缺少依赖时，脚本按 `apps/web/package-lock.json` 自动安装；需要按锁文件重装用 `-InstallDependencies`，指定网页端口用 `-Port 5174`。网页当前可独立运行，按 Ctrl+C 停止服务。
+
+构建检查：
+
+```powershell
+Set-Location .\apps\web
+npm.cmd run build
+```
+
+当前电脑已用 Node.js 24.13.1 与 npm 11.8.0 验证。页面与启动验收结果见 `docs/fourth-step.md`。
 
 ## 启动 Python 研究服务
 
@@ -120,6 +142,7 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/research/mock' -Method Post -C
 - `docs/first-step.md`：第一步的范围、数据格式和验收标准。
 - `docs/second-step.md`：Java 主后端的启动、健康检查和第二步验收结果。
 - `docs/third-step.md`：Java 调用 Python 的接口约定、配置、错误处理和第三步验收结果。
+- `docs/fourth-step.md`：React 深研室页面、本地任务预览、启动与第四步验收结果。
 - `docs/git-workflow.md`：本地版本保存与后续接入 GitHub。
 - `docs/data-sources.md`：候选数据来源与 Data Provider 边界。
 

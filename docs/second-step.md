@@ -2,7 +2,7 @@
 
 任务编号：M0-2。当前状态：**已完成，2026-10-13 编译打包与实际 HTTP 检查通过**。
 
-这一步建立接收请求的 Java 主后端。Python 和 Java 已分别可以运行；后续的 M0-3 调用已另行完成，详见 `third-step.md`，当前下一项为 M0-4 网页启动。
+这一步建立接收请求的 Java 主后端。后续的 Python 调用与基础网页已另行完成，详见 `third-step.md`、`fourth-step.md`，当前下一项为 M0-5 网页展示报告。
 
 ## 已实现内容
 
@@ -103,4 +103,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-server.p
 
 ## 后续调用：M0-3 已完成
 
-Java 已可接收研究对象、问题、偏好和预兆，调用 Python `/research/mock` 并返回演示报告。连接失败、超时和输入校验错误已验证；详见 `third-step.md`。下一项为 M0-4 React 页面启动。
+Java 已可调用 Python 返回演示报告，基础网页也已在 M0-4 完成。连接、超时和校验见 `third-step.md`，网页见 `fourth-step.md`。下一项为 M0-5 网页接入报告。

@@ -145,6 +145,6 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/research/mock' -Method Post -C
 
 以上 Java 路径均相对于 `apps/server/src/main/java/com/pathofmarket/server/`，配置文件位于 `apps/server/src/main/resources/`。
 
-## 下一项：M0-4
+## 后续网页：M0-4 已完成，下一项 M0-5
 
-按现有黑白极简设计建立 React + Vite + TypeScript 基础页面，提供研究对象和问题输入。随后 M0-5 让网页调用 Java `/api/research/mock`，展示演示报告、mock 标记和明确错误状态。
+React 基础页面、研究输入与本地任务预览已完成，见 `fourth-step.md`。下一项 M0-5 让网页调用 Java `/api/research/mock`，展示演示报告、mock 标记和明确错误状态。
