@@ -68,7 +68,7 @@ Path of Market（市场之路）是一个包含研究 Agent 的个人财经研�
 
 ## M0-1：已完成的 Python 服务
 
-状态：2026-10-13 已完成并通过实际 HTTP 检查。接口、启动方法和验证结果见 `first-step.md`。Java 启动也已在 M0-2 完成，下一项为 M0-3 Java 调用 Python。
+状态：2026-10-13 已完成并通过实际 HTTP 检查。接口、启动方法和验证结果见 `first-step.md`。Java 启动与调用也已在 M0-2、M0-3 完成，下一项为 M0-4 React 页面启动。
 
 第一步只启动 Python 服务：
 
@@ -85,7 +85,15 @@ M0 的完成不能标记为 M1 完成，也不能声称已经进行真实资料�
 
 状态：2026-10-13 已完成，Spring Boot 编译打包和实际 HTTP 检查通过。Java 提供自身健康接口 `GET /api/health`，默认只监听 `127.0.0.1:8080`。启动方法和验证结果见 `second-step.md`。
 
-Java 当前可以独立启动，尚未调用 Python。M0-3 将在现有主后端中接入 Python 的演示研究接口，沿用网页 → Java → Python 的职责边界。
+Java 可以独立启动，健康检查只检测 Java 自身。M0-3 已在现有主后端中接入 Python 的演示研究接口，沿用网页 → Java → Python 的职责边界。
+
+## M0-3：已完成的 Java 调用 Python
+
+状态：2026-10-13 已完成，通过真实链路和隔离故障 HTTP 检查。Java 新增 `POST /api/research/mock`，将 JSON 交给 Python `/research/mock`，返回 Python 的演示报告。
+
+研究字段继续由 Python 统一校验；Java 保留 JSON 原始类型并转发 422 校验详情。Java 控制服务地址、连接和完整响应等待上限，拒绝异常返回结构，提供明确的服务不可用、超时和上游错误响应。详见 `third-step.md`。
+
+当前后端链路已接通，下一项为网页启动和接入；尚未接模型或真实研究工具。
 
 ## M0：前端与两个后端的最小闭环
 

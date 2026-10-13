@@ -1,7 +1,10 @@
 ﻿[CmdletBinding()]
 param(
     [ValidateRange(1, 65535)]
-    [int]$Port = 8080
+    [int]$Port = 8080,
+    [string]$AgentBaseUrl,
+    [ValidateRange(1, 600000)]
+    [int]$AgentTimeoutMs
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +27,14 @@ if (-not (Test-Path -LiteralPath $taskJava) -or -not (Test-Path -LiteralPath $ta
 # 只设置当前脚本进程的环境，不修改系统配置。
 $env:JAVA_HOME = $taskJavaHome
 
+$taskJavaArgs = @('-Dfile.encoding=UTF-8', '-jar', $taskJar, "--server.port=$Port")
+if ($PSBoundParameters.ContainsKey('AgentBaseUrl')) {
+    $taskJavaArgs += "--agent.base-url=$AgentBaseUrl"
+}
+if ($PSBoundParameters.ContainsKey('AgentTimeoutMs')) {
+    $taskJavaArgs += "--agent.request-timeout=$($AgentTimeoutMs)ms"
+}
+
 Push-Location -LiteralPath $taskServerRoot
 try {
     Write-Host '构建 Java 主后端；首次运行需要联网下载 Maven 和项目依赖。'
@@ -33,8 +44,9 @@ try {
     }
 
     Write-Host "Java 健康检查：http://127.0.0.1:$Port/api/health"
+    Write-Host "演示研究接口：POST http://127.0.0.1:$Port/api/research/mock"
     Write-Host '按 Ctrl+C 停止服务。'
-    & $taskJava '-Dfile.encoding=UTF-8' -jar $taskJar "--server.port=$Port"
+    & $taskJava @taskJavaArgs
     $taskServerExitCode = $LASTEXITCODE
 }
 finally {

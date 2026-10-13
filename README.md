@@ -6,11 +6,11 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 ## 当前状态
 
-截至 2026-10-13，M0-1 Python 研究服务骨架、M0-2 Java 主后端启动均已完成并通过实际 HTTP 检查。两个服务可以独立运行；Java 调用 Python 与前端工程仍待实现，整个应用最小闭环尚未完成。
+截至 2026-10-13，M0-1 Python 研究服务骨架、M0-2 Java 主后端启动、M0-3 Java 调用 Python 均已完成并通过实际 HTTP 检查。Java 可将研究请求交给 Python，并返回演示报告；前端工程仍待实现，整个应用最小闭环尚未完成。
 
 已初始化本地 Git，分支为 `main`。当前没有配置远程地址，代码和提交先保存在本地。
 
-当前下一项为 M0-3 Java 调用 Python。Python 的演示服务只验证请求与报告格式，尚未接入真实模型、资料或研究 Agent。
+当前下一项为 M0-4 React 页面启动，随后 M0-5 在网页展示演示报告。Python 的演示服务只验证请求与报告格式，尚未接入真实模型、资料或研究 Agent。
 
 ## 启动 Python 研究服务
 
@@ -54,7 +54,32 @@ Set-Location 'D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路'
 
 默认只监听本机 `127.0.0.1:8080`。启动指定端口用 `-Port 8081`，对应检查用 `-BaseUrl http://127.0.0.1:8081`；按 Ctrl+C 停止服务。同一工程保持一个 Java 实例运行，重新构建前先停止原实例。
 
-Java 当前可独立运行，健康检查只说明 Java 应用可接收请求。Java 与 Python 的研究调用将在 M0-3 接入。具体文件和验证结果见 `docs/second-step.md`。
+Java 健康检查只说明 Java 应用可接收请求；研究调用已在 M0-3 接入。Java 启动基础见 `docs/second-step.md`，研究请求与错误格式见 `docs/third-step.md`。
+
+## 通过 Java 提交演示研究
+
+保持 Python 和 Java 两个服务运行，在另一个终端执行：
+
+```powershell
+$researchPayload = @{
+    target = '示例公司'
+    question = '如何研究它的研发投入变化？'
+    userStyle = '关注长期增长和风险验证'
+    omens = @('opportunity', 'abyssal_echoes')
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/research/mock' -Method Post -ContentType 'application/json; charset=utf-8' -Body ([System.Text.Encoding]::UTF8.GetBytes($researchPayload)) | ConvertTo-Json -Depth 10
+```
+
+请求进入 Java 的 `POST /api/research/mock`，再由 Java 调用 Python 的 `/research/mock`。报告仍明确标记为演示，不读取真实资料、不调用模型。
+
+验证整条后端链路及隔离的故障场景：
+
+```powershell
+.\apps\agent\.venv\Scripts\python.exe .\scripts\check-research-bridge.py --check-errors
+```
+
+默认 Python 地址为 `http://127.0.0.1:8000`，连接超时 3 秒，完整响应等待上限 10 秒。启动 Java 时可用 `-AgentBaseUrl` 和 `-AgentTimeoutMs` 覆盖地址与响应等待上限；完整配置、错误码和验证结果见 `docs/third-step.md`。
 
 ## 第一版功能
 
@@ -94,6 +119,7 @@ Java 当前可独立运行，健康检查只说明 Java 应用可接收请求。
 - `docs/report-omens.md`：深研室研究报告预兆设计。
 - `docs/first-step.md`：第一步的范围、数据格式和验收标准。
 - `docs/second-step.md`：Java 主后端的启动、健康检查和第二步验收结果。
+- `docs/third-step.md`：Java 调用 Python 的接口约定、配置、错误处理和第三步验收结果。
 - `docs/git-workflow.md`：本地版本保存与后续接入 GitHub。
 - `docs/data-sources.md`：候选数据来源与 Data Provider 边界。
 
