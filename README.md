@@ -6,11 +6,11 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 ## 当前状态
 
-截至 2026-10-13，M0-1 Python 研究服务骨架已完成并通过实际 HTTP 检查。Java 入口仍是占位文件，前端尚未建立可运行工程，整个应用最小闭环尚未完成。
+截至 2026-10-13，M0-1 Python 研究服务骨架、M0-2 Java 主后端启动均已完成并通过实际 HTTP 检查。两个服务可以独立运行；Java 调用 Python 与前端工程仍待实现，整个应用最小闭环尚未完成。
 
 已初始化本地 Git，分支为 `main`。当前没有配置远程地址，代码和提交先保存在本地。
 
-当前下一项为 M0-2 Java 主后端启动。Python 的演示服务只验证请求与报告格式，尚未接入真实模型、资料或研究 Agent。
+当前下一项为 M0-3 Java 调用 Python。Python 的演示服务只验证请求与报告格式，尚未接入真实模型、资料或研究 Agent。
 
 ## 启动 Python 研究服务
 
@@ -32,6 +32,29 @@ Set-Location 'D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路'
 启动脚本自动定位项目和虚拟环境，第一次缺少环境或依赖时会安装 `apps/agent/requirements.txt`。已有环境需要重装锁定版本时使用 `-InstallDependencies`，开发时可使用 `-Reload`，指定端口用 `-Port 8001`。按 Ctrl+C 停止服务。
 
 详细请求示例、字段限制和验证结果见 `docs/first-step.md`。
+
+## 启动 Java 主后端
+
+在另一个 PowerShell 终端执行：
+
+```powershell
+Set-Location 'D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路'
+.\scripts\start-server.ps1
+```
+
+启动脚本先构建再运行。第一次需要联网，由 Maven Wrapper 下载固定版本 Maven 和项目依赖；本机需要 JDK 21 或更高版本，无需单独安装 Maven。
+
+打开 `http://127.0.0.1:8080/api/health`，应看到 `{"status":"ok","service":"server"}`。这里展示健康检查 JSON，完整操作页面属于后续前端任务。
+
+另开终端检查接口：
+
+```powershell
+.\scripts\check-server.ps1
+```
+
+默认只监听本机 `127.0.0.1:8080`。启动指定端口用 `-Port 8081`，对应检查用 `-BaseUrl http://127.0.0.1:8081`；按 Ctrl+C 停止服务。同一工程保持一个 Java 实例运行，重新构建前先停止原实例。
+
+Java 当前可独立运行，健康检查只说明 Java 应用可接收请求。Java 与 Python 的研究调用将在 M0-3 接入。具体文件和验证结果见 `docs/second-step.md`。
 
 ## 第一版功能
 
@@ -70,6 +93,7 @@ Set-Location 'D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路'
 - `docs/design-style.md`：前端设计风格。
 - `docs/report-omens.md`：深研室研究报告预兆设计。
 - `docs/first-step.md`：第一步的范围、数据格式和验收标准。
+- `docs/second-step.md`：Java 主后端的启动、健康检查和第二步验收结果。
 - `docs/git-workflow.md`：本地版本保存与后续接入 GitHub。
 - `docs/data-sources.md`：候选数据来源与 Data Provider 边界。
 
