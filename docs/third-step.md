@@ -104,7 +104,7 @@ $researchPayload = @{
 Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/research/mock' -Method Post -ContentType 'application/json; charset=utf-8' -Body ([System.Text.Encoding]::UTF8.GetBytes($researchPayload)) | ConvertTo-Json -Depth 10
 ```
 
-浏览器直接打开上述 URL 发出的是 GET，无法提交研究任务。当前可以通过 PowerShell 发送；下一步网页会提供输入框与按钮。
+浏览器直接打开上述 API URL 发出的是 GET，无法提交研究任务。可以通过 PowerShell 发送，或使用 M0-5 已接通的网页按钮，见 `fifth-step.md`。
 
 ## 检查方法
 
@@ -145,6 +145,6 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/research/mock' -Method Post -C
 
 以上 Java 路径均相对于 `apps/server/src/main/java/com/pathofmarket/server/`，配置文件位于 `apps/server/src/main/resources/`。
 
-## 后续网页：M0-4 已完成，下一项 M0-5
+## 后续网页：M0-4、M0-5 已完成
 
-React 基础页面、研究输入与本地任务预览已完成，见 `fourth-step.md`。下一项 M0-5 让网页调用 Java `/api/research/mock`，展示演示报告、mock 标记和明确错误状态。
+网页已可调用 Java `/api/research/mock` 并展示演示报告、mock 标记与明确错误。基础页面见 `fourth-step.md`，报告接入见 `fifth-step.md`。下一项为 M0-6 完整应用启动说明。
