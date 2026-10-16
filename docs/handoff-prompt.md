@@ -17,6 +17,7 @@ D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路
 - docs/task-board.md
 - docs/first-step.md（如果本次是 M0-1）
 - docs/git-workflow.md
+- docs/sixth-step.md（整套应用运行与检查）
 - docs/design-style.md（如果本次涉及前端 UI）
 
 项目基本架构：
@@ -61,6 +62,7 @@ M0 内部顺序：Python 演示接口 -> Java 启动与调用 -> 网页输入与
 不要接真实 LLM、资料检索、数据库、Java 或前端。
 如果用户本次只要求检查或规划，不进行业务实现。
 
+截至 2026-10-16，M0-1 至 M0-6 均已完成，整套应用可统一启动、检查和停止；当前下一项为 M1-1。
 M1 的真实 Agent 任务必须单独验证模型选择工具、依据结果补查或结束；不虚构来源或工具记录。
 
 完成后运行对应检查，更新 docs/current-state.md 和 docs/task-board.md，检查 Git diff 并提交本任务改动。
