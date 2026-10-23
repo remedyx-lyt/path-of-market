@@ -14,7 +14,7 @@ export type ResearchDraft = {
   omens: ReportOmen[]
 }
 
-export type DraftErrors = Partial<Record<'target' | 'question' | 'userStyle' | 'omens', string>>
+export type DraftErrors = Partial<Record<'target' | 'question' | 'userStyle' | 'omens' | 'asOfDate', string>>
 
 export const EMPTY_DRAFT: ResearchDraft = { target: '', question: '', userStyle: '', omens: [] }
 

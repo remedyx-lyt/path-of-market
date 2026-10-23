@@ -6,11 +6,15 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 ## 当前状态
 
-截至 2026-10-16，M0-1 至 M0-6 已完成，完整应用骨架可通过统一命令启动、检查和停止。网页 → Java → Python → 网页展示演示报告的功能闭环、启动恢复与浏览器操作均已验证。
+截至 2026-10-23，M0 完整应用骨架与 M1-1 模型接口均已完成。网页经 Java、Python 实际调用 DeepSeek 并展示模型分析、研究截止日期和任务状态；原有演示模式保留，整套应用可统一启动、检查和停止。
 
 已初始化本地 Git，分支为 `main`。当前没有配置远程地址，代码和提交先保存在本地。
 
-当前下一项为 M1-1：模型接口与研究状态。当前报告为演示内容，尚未接入真实模型、资料或动态研究循环。
+当前下一项为 M1-2：少量真实资料与工具。当前可生成模型分析，但尚未检索财报、行情或执行研究工具；页面明确标注未检索资料。
+
+## 配置模型密钥
+
+项目根目录 `.env` 中填写 `DEEPSEEK_API_KEY`；本次已创建该本地文件，已有文件不要覆盖。只有 Python 读取密钥，文件已被 Git 忽略。默认 `DEEPSEEK_BASE_URL=https://api.deepseek.com`、`DEEPSEEK_MODEL=deepseek-flash`；保存密钥后可直接重试。完整配置与排查见 [M1-1 说明](docs/m1-1-model.md)。
 
 ## 启动、检查、停止整套应用
 
@@ -26,7 +30,7 @@ Set-Location 'D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路'
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-app.ps1
 ```
 
-打开 http://127.0.0.1:5173/ ，点击“填入示例 → 生成演示报告”。服务在后台运行，关闭启动终端后仍可使用；电脑重启后需要重新启动。
+打开 http://127.0.0.1:5173/ ，默认选择“模型分析”，填写问题后点“生成模型分析”。也可切换“演示报告”检查固定报告，不消耗模型额度。服务在后台运行，关闭启动终端后仍可使用；电脑重启后需要重新启动。
 
 | 服务 | 端口 | 分工 |
 | --- | --- | --- |
@@ -34,7 +38,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-app.ps1
 | Java 主后端 | 8080 | 接收请求并调用 Python |
 | Python 研究服务 | 8000 | 执行研究任务，当前返回演示报告 |
 
-检查三服务与完整研究链路：
+检查三服务与完整基础链路（使用演示接口，不调用模型账户）：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-app.ps1
@@ -52,7 +56,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-app.ps1
 
 需要分别看日志时，先停止统一入口的应用，再在三个终端分别运行 `scripts/start-agent.ps1`、`scripts/start-server.ps1`、`scripts/start-web.ps1`；在各终端按 Ctrl+C 停止。统一停止脚本不管理单独启动的服务。
 
-Python 自动管理虚拟环境与依赖，网页按锁文件安装依赖，Java 使用 Maven Wrapper 构建。本机已验证 Python 3.14.3、JDK 25.0.2、Node.js 24.13.1 / npm 11.8.0。当前演示无需模型密钥或数据库。
+Python 自动管理虚拟环境与依赖，网页按锁文件安装依赖，Java 使用 Maven Wrapper 构建。本机已验证 Python 3.14.3、JDK 25.0.2、Node.js 24.13.1 / npm 11.8.0。演示模式无需模型密钥；模型分析需本地 `.env` 配置，当前两种模式均无需数据库。
 
 原有专项检查仍可使用：
 
@@ -106,6 +110,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 - `docs/fourth-step.md`：React 深研室页面、本地任务预览、启动与第四步验收结果。
 - `docs/fifth-step.md`：网页报告调用、完整展示、等待/取消、错误和第五步验收结果。
 - `docs/sixth-step.md`：整套应用启动、停止、四项链路检查与错误排查。
+- `docs/m1-1-model.md`：模型密钥、真实模型调用、研究状态、证据边界与验收结果。
 - `docs/git-workflow.md`：本地版本保存与后续接入 GitHub。
 - `docs/data-sources.md`：候选数据来源与 Data Provider 边界。
 

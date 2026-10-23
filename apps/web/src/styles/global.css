@@ -135,3 +135,14 @@ button:disabled { opacity: 0.55; cursor: wait; }
   .site-footer { margin: 0 20px; align-items: flex-start; }
   .site-footer > span { max-width: 220px; line-height: 1.8; }
 }
+.mode-selector {
+  margin: 0;
+  padding: 0 0 18px;
+  border: 0;
+  border-bottom: 1px solid var(--border, #e5e5e5);
+}
+.mode-selector legend { margin-bottom: 12px; font-size: 14px; font-weight: 700; }
+.mode-selector label { display: inline-flex; align-items: center; gap: 8px; margin: 0 24px 8px 0; font-size: 14px; cursor: pointer; }
+.mode-selector input { accent-color: #111; }
+.mode-selector p, .report-limitations p { margin: 4px 0 0; font-size: 13px; line-height: 1.7; opacity: 0.72; }
+.report-limitations { margin-top: 20px; padding-top: 16px; border-top: 1px solid #555; }

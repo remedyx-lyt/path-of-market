@@ -44,4 +44,4 @@ catch {
 if ($taskFailures.Count -gt 0) {
     throw "应用检查失败：$($taskFailures -join ', ')。请运行 start-app.ps1 或查看 .runtime/logs；排查说明见 docs/sixth-step.md。"
 }
-Write-Host 'PASS: 全部 4 项应用检查通过。当前仍为演示模式。'
+Write-Host 'PASS: 全部 4 项基础检查通过（使用演示接口，不调用模型账户）。'

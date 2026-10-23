@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** Python 服务地址与有限等待时间，启动时检查配置。 */
 @ConfigurationProperties(prefix = "agent")
-public record AgentProperties(URI baseUrl, Duration connectTimeout, Duration requestTimeout) {
+public record AgentProperties(URI baseUrl, Duration connectTimeout, Duration requestTimeout, Duration modelRequestTimeout) {
 
     public AgentProperties {
         if (baseUrl == null || baseUrl.getHost() == null
@@ -17,6 +17,7 @@ public record AgentProperties(URI baseUrl, Duration connectTimeout, Duration req
         }
         requirePositiveMillis(connectTimeout, "agent.connect-timeout");
         requirePositiveMillis(requestTimeout, "agent.request-timeout");
+        requirePositiveMillis(modelRequestTimeout, "agent.model-request-timeout");
     }
 
     private static void requirePositiveMillis(Duration timeout, String name) {
@@ -27,5 +28,9 @@ public record AgentProperties(URI baseUrl, Duration connectTimeout, Duration req
 
     public URI mockResearchUri() {
         return URI.create(baseUrl.toString().replaceAll("/+$", "") + "/research/mock");
+    }
+
+    public URI modelResearchUri() {
+        return URI.create(baseUrl.toString().replaceAll("/+$", "") + "/research/model");
     }
 }

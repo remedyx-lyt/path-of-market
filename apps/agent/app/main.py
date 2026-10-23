@@ -7,8 +7,8 @@ from app.api.routes.research import router
 
 app = FastAPI(
     title="Path of Market 研究服务",
-    description="M0-1 演示接口：验证研究请求与报告格式，尚未接入真实模型或资料。",
-    version="0.1.0",
+    description="保留 M0 演示接口；M1-1 接入模型与研究状态，真实资料工具后续接入。",
+    version="0.2.0",
 )
 app.include_router(router)
 

@@ -1,14 +1,14 @@
 import { OMENS } from './researchDraft'
 import type { ResearchDraft } from './researchDraft'
-import type { MockResearchReport } from '../../api/research'
+import type { ResearchReport as Report } from '../../api/research'
 import { ResearchReport } from './ResearchReport'
 
-type Props = { draft: ResearchDraft | null; report: MockResearchReport | null; isGenerating: boolean; hasError: boolean }
+type Props = { draft: ResearchDraft | null; report: Report | null; isGenerating: boolean; hasError: boolean }
 
 export function ResearchPreview({ draft, report, isGenerating, hasError }: Props) {
   const status = isGenerating ? '正在获取报告' : hasError ? '生成失败' : report ? '报告已返回' : draft ? '任务已预览' : '等待输入'
   return (
-    <aside className={`research-preview${report ? ' research-preview--report' : ''}`} aria-label={report ? '演示研究报告' : '研究任务预览'} aria-busy={isGenerating}>
+    <aside className={`research-preview${report ? ' research-preview--report' : ''}`} aria-label={report ? report.mode === 'model' ? '模型分析报告' : '演示研究报告' : '研究任务预览'} aria-busy={isGenerating}>
       <div className="preview-topline">
         <span className="eyebrow">RESEARCH BRIEF</span>
         <span className={`preview-status${report || draft && !isGenerating && !hasError ? ' preview-status--ready' : ''}`}>
@@ -46,8 +46,8 @@ export function ResearchPreview({ draft, report, isGenerating, hasError }: Props
       </dl>
       <div className="report-placeholder">
         <span className="report-placeholder-label">研究报告</span>
-        <p>{isGenerating ? '正在获取演示报告…' : '报告尚未生成'}</p>
-        <span>{isGenerating ? '请稍候，也可以取消并清空任务。' : '填写研究任务后，点击“生成演示报告”。'}</span>
+        <p>{isGenerating ? '正在获取报告…' : '报告尚未生成'}</p>
+        <span>{isGenerating ? '请稍候，也可以取消并清空任务。' : '填写研究任务，选择生成方式后提交。'}</span>
       </div>
       </>}
     </aside>

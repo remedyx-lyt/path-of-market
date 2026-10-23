@@ -23,4 +23,10 @@ public class ResearchController {
     public ResponseEntity<JsonNode> researchMock(@RequestBody JsonNode input) {
         return agentResearchClient.researchMock(input);
     }
+
+    @PostMapping(value = "/api/research/model", consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<JsonNode> researchModel(@RequestBody JsonNode input) {
+        return agentResearchClient.researchModel(input);
+    }
 }

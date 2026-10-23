@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { generateMockReport, ResearchApiError } from '../../api/research'
-import type { MockResearchReport } from '../../api/research'
+import { generateReport, ResearchApiError } from '../../api/research'
+import type { ResearchReport, ResearchMode } from '../../api/research'
 import { ResearchPreview } from './ResearchPreview'
 import { characterCount, EMPTY_DRAFT, EXAMPLE_DRAFT, normalizeDraft, OMENS, validateDraft } from './researchDraft'
 import type { DraftErrors, ReportOmen, ResearchDraft } from './researchDraft'
@@ -11,7 +11,12 @@ export function ResearchWorkspace() {
   const [preview, setPreview] = useState<ResearchDraft | null>(null)
   const [errors, setErrors] = useState<DraftErrors>({})
   const [message, setMessage] = useState('')
-  const [report, setReport] = useState<MockResearchReport | null>(null)
+  const [report, setReport] = useState<ResearchReport | null>(null)
+  const [mode, setMode] = useState<ResearchMode>('model')
+  const [asOfDate, setAsOfDate] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  })
   const [requestError, setRequestError] = useState<ResearchApiError | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const requestRef = useRef<AbortController | null>(null)
@@ -19,14 +24,16 @@ export function ResearchWorkspace() {
   const targetRef = useRef<HTMLInputElement>(null)
   const questionRef = useRef<HTMLTextAreaElement>(null)
   const styleRef = useRef<HTMLTextAreaElement>(null)
+  const dateRef = useRef<HTMLInputElement>(null)
   const optionsRef = useRef<HTMLDetailsElement>(null)
 
   const focusErrors = useCallback((fieldErrors: DraftErrors) => {
     if (fieldErrors.target) targetRef.current?.focus()
     else if (fieldErrors.question) questionRef.current?.focus()
-    else if (fieldErrors.userStyle || fieldErrors.omens) {
+    else if (fieldErrors.asOfDate || fieldErrors.userStyle || fieldErrors.omens) {
       if (optionsRef.current) optionsRef.current.open = true
-      if (fieldErrors.userStyle) styleRef.current?.focus()
+      if (fieldErrors.asOfDate) dateRef.current?.focus()
+      else if (fieldErrors.userStyle) styleRef.current?.focus()
       else optionsRef.current?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.focus()
     }
   }, [])
@@ -63,6 +70,7 @@ export function ResearchWorkspace() {
 
   function prepareDraft() {
     const nextErrors = validateDraft(draft)
+    if (mode === 'model' && (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate) || Number.isNaN(Date.parse(asOfDate)))) nextErrors.asOfDate = '请填写有效的研究截止日期。'
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length) {
       setPreview(null)
@@ -79,7 +87,7 @@ export function ResearchWorkspace() {
     if (!prepared) return
     setPreview(prepared)
     setRequestError(null)
-    setMessage(report ? '研究任务已预览，右侧保留本次演示报告。' : '研究任务已预览，可以生成演示报告。')
+    setMessage(report ? '研究任务已预览，右侧保留本次报告。' : '研究任务已预览，可以生成报告。')
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -95,11 +103,11 @@ export function ResearchWorkspace() {
     setMessage('')
     setIsGenerating(true)
     try {
-      const result = await generateMockReport(prepared, controller.signal)
+      const result = await generateReport(prepared, controller.signal, mode, asOfDate)
       if (requestRef.current !== controller) return
       setReport(result)
       setPreview({ target: result.target, question: result.question, userStyle: result.userStyle, omens: result.omens })
-      setMessage('演示报告已返回，尚未进行真实资料研究。')
+      setMessage(result.mode === 'model' ? '模型分析已返回；本次未检索真实资料。' : '演示报告已返回，尚未进行真实资料研究。')
     } catch (error) {
       if (requestRef.current !== controller) return
       const failure = error instanceof ResearchApiError ? error : new ResearchApiError('报告生成失败，请稍后重试。', 'UNKNOWN_ERROR')
@@ -118,7 +126,7 @@ export function ResearchWorkspace() {
     setDraft({ ...EXAMPLE_DRAFT, omens: [...EXAMPLE_DRAFT.omens] })
     invalidateResult()
     setErrors({})
-    setMessage('已填入示例，可修改或直接生成演示报告。')
+    setMessage('已填入示例，可修改或直接生成报告。')
     targetRef.current?.focus()
   }
 
@@ -148,6 +156,14 @@ export function ResearchWorkspace() {
             <h2>准备研究任务</h2>
             <button className="text-button" type="button" onClick={fillExample} disabled={isGenerating}>填入示例 <span aria-hidden="true">↗</span></button>
           </div>
+          <fieldset className="mode-selector" disabled={isGenerating}>
+            <legend>生成方式</legend>
+            {([{ value: 'model', label: '模型分析' }, { value: 'mock', label: '演示报告' }] as const).map((option) => (
+              <label key={option.value}><input type="radio" name="researchMode" value={option.value} checked={mode === option.value}
+                onChange={() => { setMode(option.value); setErrors({}); invalidateResult() }} />{option.label}</label>
+            ))}
+            <p>{mode === 'model' ? '调用模型生成研究思路，本阶段尚未检索资料。' : '使用固定内容检查应用，不调用模型。'}</p>
+          </fieldset>
           <div className="form-field">
             <label htmlFor="research-target">研究对象 <span>必填</span></label>
             <input
@@ -185,6 +201,13 @@ export function ResearchWorkspace() {
             </summary>
             <div className="options-content">
               <div className="form-field">
+                <label htmlFor="research-date">研究截止日期</label>
+                <input ref={dateRef} id="research-date" type="date" value={asOfDate} disabled={isGenerating}
+                  onChange={(event) => { setAsOfDate(event.target.value); setErrors((current) => ({ ...current, asOfDate: undefined })); invalidateResult() }}
+                  aria-invalid={!!errors.asOfDate} aria-describedby={errors.asOfDate ? 'date-error' : undefined} />
+                {errors.asOfDate && <p className="field-error" id="date-error">{errors.asOfDate}</p>}
+              </div>
+              <div className="form-field">
                 <label htmlFor="research-style">研究偏好</label>
                 <textarea
                   ref={styleRef} id="research-style" name="userStyle" rows={2} disabled={isGenerating}
@@ -214,12 +237,12 @@ export function ResearchWorkspace() {
             </div>
           </details>
           <div className="form-actions">
-            <button className="primary-button" type="submit" disabled={isGenerating}>{isGenerating ? '正在获取报告…' : '生成演示报告'} <span aria-hidden="true">→</span></button>
+            <button className="primary-button" type="submit" disabled={isGenerating}>{isGenerating ? '正在获取报告…' : mode === 'model' ? '生成模型分析' : '生成演示报告'} <span aria-hidden="true">→</span></button>
             <button className="secondary-button" type="button" onClick={previewTask} disabled={isGenerating}>预览任务</button>
             <button className="secondary-button" type="button" onClick={reset}>{isGenerating ? '取消并清空' : '清空'}</button>
           </div>
           {requestError && <div className="request-error" role="alert"><strong>报告未生成</strong><p>{requestError.message}</p></div>}
-          <p className="form-message" role="status">{message || (isGenerating ? '正在等待研究服务返回演示报告。' : '可先预览任务，也可以直接生成演示报告。')}</p>
+          <p className="form-message" role="status">{message || (isGenerating ? '正在等待研究服务返回报告。' : '可先预览任务，也可以直接生成报告。')}</p>
         </form>
       </section>
       <ResearchPreview draft={preview} report={report} isGenerating={isGenerating} hasError={!!requestError} />

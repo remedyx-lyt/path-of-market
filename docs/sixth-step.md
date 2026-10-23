@@ -10,7 +10,7 @@
 | Java 主后端（server） | http://127.0.0.1:8080/api/health | 接收网页请求，调用 Python，再把报告交给网页 |
 | Python 研究服务（agent） | http://127.0.0.1:8000/docs | 执行研究任务；当前返回演示报告，后续接模型、资料和工具 |
 
-使用时只打开网页。三个服务均运行在自己的电脑上，当前无需数据库、Docker 或模型 API Key。
+使用时只打开网页。三个服务均运行在自己的电脑上，演示模式无需数据库、Docker 或模型 API Key。后续 M1-1 已增加模型分析，密钥配置见 `m1-1-model.md`。
 
 ```text
 浏览器 → React 网页的 /api 代理 → Java 主后端 → Python 研究服务
@@ -31,7 +31,7 @@ Set-Location 'D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路'
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-app.ps1
 ```
 
-看到“全部 4 项应用检查通过”和“整套应用已启动”后，打开 http://127.0.0.1:5173/ 。点击“填入示例 → 生成演示报告”。启动命令返回后可以关闭终端；服务在后台运行，电脑重启后需要重新启动。
+看到“全部 4 项基础检查通过”和“整套应用已启动”后，打开 http://127.0.0.1:5173/ 。点击“填入示例 → 生成演示报告”。启动命令返回后可以关闭终端；服务在后台运行，电脑重启后需要重新启动。
 
 检查是否正常：
 
@@ -91,7 +91,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-app.ps1 
 
 第四项经过真实 HTTP 调用，覆盖网页代理 → Java → Python。Windows PowerShell 5.1 检查脚本按 UTF-8 读取 JSON 原始字节，避免其默认字符集使中文对比失败。HTML/API 检查不能代替浏览器渲染检查；界面操作按“填入示例 → 生成演示报告”确认。
 
-当前通过说明应用骨架能运行和传递报告。报告仍为演示模板，不表示已经完成模型分析、财报检索或 Agent 工具循环。
+这四项基础检查使用演示报告，只确认应用骨架正常，不调用模型账户。M1-1 已另行接入并验证真实模型，配置和主动调用检查见 `m1-1-model.md`；财报检索与 Agent 工具循环仍在之后实现。
 
 ## 常见问题
 
@@ -173,4 +173,4 @@ Get-NetTCPConnection -State Listen -LocalPort 8000,8080,5173 -ErrorAction Silent
 
 ## 下一项
 
-M0 完成后进入 M1-1：模型接口与研究状态，再逐步接入真实资料工具和动态研究循环，沿用既定三服务架构。
+M1-1 模型接口与研究状态已于 2026-10-23 完成，见 `m1-1-model.md`。当前下一项为 M1-2 真实资料与工具，沿用既定三服务架构。
