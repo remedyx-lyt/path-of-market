@@ -9,6 +9,7 @@
 D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路
 
 请先阅读：
+- AGENTS.md（核心设计参考、资料通读与学习交接约定）
 - README.md
 - docs/architecture.md
 - docs/research-runtime-plan.md（运行架构、长报告与表图要求）
@@ -20,6 +21,8 @@ D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路
 - docs/git-workflow.md
 - docs/sixth-step.md（整套应用运行与检查）
 - docs/m1-1-model.md（本地模型配置、真实调用与研究状态）
+- docs/m1-2-tools.md（已完成的六个资料工具、自动发现、全本连续读取）
+- docs/agent-design-decisions.md（Pi/官方实践、JSONL 会话与分阶段状态）
 - docs/design-style.md（如果本次涉及前端 UI）
 
 项目基本架构：
@@ -64,8 +67,8 @@ M0 内部顺序：Python 演示接口 -> Java 启动与调用 -> 网页输入与
 不要接真实 LLM、资料检索、数据库、Java 或前端。
 如果用户本次只要求检查或规划，不进行业务实现。
 
-截至 2026-10-23，M0-1 至 M0-6、M1-1 均已完成，网页已通过 Java/Python 实际调用 DeepSeek，模型分析明确未检索资料；当前下一项为 M1-2。本地 `.env` 已配置，读取和检查时不要输出或提交密钥。
-正式研究报告的表格、图表、长文分章与上下文/检查点要求已补进计划，仍按 M1-2 → M1-3 → M1-4 → M2 顺序逐项实施。
+截至 2026-10-23，M0-1 至 M0-6、M1-1、M1-2 均已完成，网页模型分析仍明确未检索资料；六个资料工具已独立可用。当前下一项为 M1-3：动态模型工具循环，选定原始资料完整分批阅读，记录实际模型处理覆盖。本地 `.env` 已配置，读取和检查时不要输出或提交密钥。
+会话采用 JSONL 追加、ID/parentId 与当前分支方向，核心机制参考成熟实现并记录依据，见 `AGENTS.md` 和 `agent-design-decisions.md`。正式报告表图、长文、实际会话落盘与恢复仍按 M1-3 → M1-4 → M2 顺序实施；每次核心更新需说明工具/组件的用途与代码位置，供用户学习。
 M1 的真实 Agent 任务必须单独验证模型选择工具、依据结果补查或结束；不虚构来源或工具记录。
 
 完成后运行对应检查，更新 docs/current-state.md 和 docs/task-board.md，检查 Git diff 并提交本任务改动。

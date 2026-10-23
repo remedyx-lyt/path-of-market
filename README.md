@@ -6,11 +6,21 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 ## 当前状态
 
-截至 2026-10-23，M0 完整应用骨架与 M1-1 模型接口均已完成。网页经 Java、Python 实际调用 DeepSeek 并展示模型分析、研究截止日期和任务状态；原有演示模式保留，整套应用可统一启动、检查和停止。
+截至 2026-10-23，M0 完整应用骨架、M1-1 模型接口与 M1-2 真实资料工具层已完成。网页经 Java、Python 实际调用 DeepSeek 并展示模型分析；六个工具能自动查找官方年报、下载缓存、连续分批读取全本及重点回查。
 
 已初始化本地 Git，分支为 `main`。当前没有配置远程地址，代码和提交先保存在本地。
 
-当前下一项为 M1-2：少量真实资料与工具。当前可生成模型分析，但尚未检索财报、行情或执行研究工具；页面明确标注未检索资料。
+下一项为 M1-3：把工具接入模型自主研究循环。当前网页仍调用原有未检索资料的模型分析，工具独立可用，尚未在网页报告中使用。所有选定研究资料默认通读，分批处理与覆盖记录按 [核心设计依据](docs/agent-design-decisions.md) 推进。
+
+## 自动资料工具（M1-2）
+
+输入公司与年度，程序自己寻找和下载公开年报，不需要先上传 PDF。工具层真实联网验收已通过同花顺两份年报与沪市报告查找；详细入口、六个工具及限制见 [M1-2 说明](docs/m1-2-tools.md)。
+
+```powershell
+.\apps\agent\.venv\Scripts\python.exe .\scripts\try-report-tools.py --company 同花顺 --years 2024 2025 --as-of 2026-10-23 --query 研发投入金额
+```
+
+此命令分批返回全本文字并演示重点回查，不调用模型账户。结果在 `storage/runs/m1-2-tools.json`；Python `/docs` 也提供工具验收接口。完整阅读不等于把整本一次塞进上下文，也不等于模型已处理；下一步 Runner 记录实际模型处理覆盖。
 
 ## 配置模型密钥
 
@@ -36,7 +46,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-app.ps1
 | --- | --- | --- |
 | React 网页 | 5173 | 输入与展示 |
 | Java 主后端 | 8080 | 接收请求并调用 Python |
-| Python 研究服务 | 8000 | 执行研究任务，当前返回演示报告 |
+| Python 研究服务 | 8000 | 演示、模型分析与独立资料工具，下一步接动态循环 |
 
 检查三服务与完整基础链路（使用演示接口，不调用模型账户）：
 
@@ -84,7 +94,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 - Agent 服务：Python + FastAPI，负责 LLM、RAG、文档解析、工具调用和 Agent 工作流。
 - 数据库：先用 SQLite 或 PostgreSQL，后续以 PostgreSQL 为主。
 - 大语言模型：先用 DeepSeek API，后续预留其他模型供应商。
-- 数据来源：上传文件、搜索工具、免费或低成本行情 API。
+- 数据来源：系统自动发现的公开原始资料、补充上传、后续搜索与行情 Provider。
 
 以上是现有技术路线。Agent 编排库尚未确定；第一步建立服务和数据格式，后续再为真实研究循环选择 SDK 或编排实现。
 
@@ -98,6 +108,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 
 - `docs/architecture.md`：架构说明。
 - `docs/research-runtime-plan.md`：研究上下文、工具循环、记忆、长报告、表格图表与阶段安排。
+- `AGENTS.md`、`docs/agent-design-decisions.md`：核心机制参考成熟实践、JSONL 会话方向、统一资料通读和学习交接。
+- `docs/m1-2-tools.md`：自动查年报、六个工具、连续全本阅读与验收。
 - `docs/current-state.md`：当前进度。
 - `docs/task-board.md`：任务板。
 - `docs/dev-workflow.md`：AI 协作开发工作流。
@@ -124,7 +136,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 
 2026-10-12 用户已确认恢复原来的最小闭环：先得到能打开、能输入、能展示演示报告的应用骨架，再接真实模型、资料工具和特色功能。应用架构和产品模块沿用原设计。
 
-2026-10-23 补充确认正式报告需要表格和图表，支持长文分章、上下文预算与研究检查点；详见 `docs/research-runtime-plan.md`。这些要求纳入后续任务，下一步仍是 M1-2 真实资料与基础工具。
+2026-10-23 补充确认正式报告需要表格、图表、长文分章、上下文预算与研究检查点；这些仍为后续任务。M1-2 已完成，下一步为 M1-3；选定研究资料默认通读、会话 JSONL 方向与成熟实践依据见 `docs/agent-design-decisions.md`。
 
 每个里程碑继续拆成小任务；完成一个任务后核查结果、更新进度文档并提交 Git。具体状态以 `docs/current-state.md` 和 `docs/task-board.md` 为准。
 

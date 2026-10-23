@@ -34,6 +34,7 @@ storage/vectorstore/**
 !storage/vectorstore/.gitkeep
 storage/runs/
 storage/reports/
+storage/documents/
 *.db
 *.db-shm
 *.db-wal
