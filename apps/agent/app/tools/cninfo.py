@@ -27,13 +27,15 @@ class NoRedirect(HTTPRedirectHandler):
 
 class PublicTransport:
     """固定官方主机、不转发模型密钥；限制每次请求的大小与等待时间。"""
+    hosts = {"www.cninfo.com.cn", "static.cninfo.com.cn"}
+
     def __init__(self, timeout: float = 20):
         self.timeout = timeout
         self.opener = build_opener(NoRedirect())
 
     def get_bytes(self, url: str, *, form: dict | None = None, maximum: int = 8_000_000) -> bytes:
         parsed = urlsplit(url)
-        if (parsed.scheme != "https" or parsed.hostname not in {"www.cninfo.com.cn", "static.cninfo.com.cn"}
+        if (parsed.scheme != "https" or parsed.hostname not in self.hosts
                 or parsed.username or parsed.password or parsed.port not in {None, 443}):
             raise ToolError("SOURCE_URL_REJECTED", "资料地址不属于当前接入的官方来源。")
         headers = {"User-Agent": "Mozilla/5.0 PathOfMarket/0.3", "Referer": SITE + "/",
@@ -120,9 +122,11 @@ class CninfoProvider:
                 "orgId": row["orgId"], "provider": self.name,
                 "directoryUrl": SITE + "/new/data/szse_stock.json", "resolvedAt": utc_now()}
 
-    def find_documents(self, company: dict, years: list[int], as_of: str) -> dict:
+    def find_documents(self, company: dict, years: list[int], as_of: str, report_types=None) -> dict:
         # 同一会计年度的完整修订版可能较晚披露；一直查到研究截止日。
         cutoff = date.fromisoformat(as_of)
+        report_types = report_types or ["annual"]
+        categories = {"annual": "ndbg", "interim": "bndbg", "q1": "yjdbg", "q3": "sjdbg"}
         if cutoff < date(min(years), 1, 1):
             return {"documents": [], "missingYears": sorted(years), "queryComplete": True}
         found, complete = {}, False
@@ -130,7 +134,7 @@ class CninfoProvider:
             result = self.transport.get_json(SITE + "/new/hisAnnouncement/query", form={
                 "pageNum": page, "pageSize": 30, "column": "szse" if company["exchange"] == "SZSE" else "sse",
                 "tabName": "fulltext", "stock": company["code"] + "," + company["orgId"],
-                "searchkey": "", "secid": "", "plate": "", "category": "category_ndbg_szsh;",
+                "searchkey": "", "secid": "", "plate": "", "category": ";".join("category_" + categories[t] + "_szsh" for t in report_types) + ";",
                 "trade": "", "seDate": f"{min(years)}-01-01~{as_of}", "sortName": "time",
                 "sortType": "desc", "isHLtitle": "false"})
             if (not isinstance(result, dict) or "announcements" not in result
@@ -138,7 +142,7 @@ class CninfoProvider:
                     or not isinstance(result.get("hasMore"), bool)):
                 raise ToolError("SOURCE_INVALID_RESPONSE", "公告查询格式发生变化，需要更新适配器。")
             for item in result["announcements"] or []:
-                document = self._document(item, company, years, cutoff)
+                document = self._document(item, company, years, cutoff, report_types)
                 if document:
                     found[document["documentId"]] = document
             if not result["hasMore"]:
@@ -146,19 +150,25 @@ class CninfoProvider:
                 break
         documents = sorted(found.values(), key=lambda r: (r["fiscalYear"], r["publishedAt"], r["documentId"]), reverse=True)
         # 每年优先使用截止日内最新披露的完整版本，同时保留候选以供冲突核查。
-        selected = set()
+        selected, selected_years = set(), set()
         for document in documents:
-            document["preferred"] = document["fiscalYear"] not in selected
-            selected.add(document["fiscalYear"])
-        return {"documents": documents, "missingYears": sorted(set(years) - selected), "queryComplete": complete}
+            key = (document["fiscalYear"], document["reportType"])
+            document["preferred"] = key not in selected
+            selected.add(key)
+            selected_years.add(document["fiscalYear"])
+        return {"documents": documents, "missingYears": sorted(set(years) - selected_years), "queryComplete": complete,
+                "missingReports": [{"year": y, "reportType": t} for y in sorted(years) for t in report_types if (y, t) not in selected]}
 
-    def _document(self, item, company, years, cutoff):
+    def _document(self, item, company, years, cutoff, report_types=None):
         if not isinstance(item, dict) or item.get("secCode") != company["code"] or item.get("orgId") != company["orgId"]:
             return None
         title = html.unescape(re.sub(r"<[^>]+>", "", str(item.get("announcementTitle", "")))).strip()
-        match = re.search(r"(20[0-9]{2})\s*年?年度报告(?:全文)?(?:[（(][^）)]*(?:修订|更新|更正|修正)[^）)]*[）)])?$", title)
+        match = re.search(r"(20[0-9]{2})\s*年?(年度|半年度|第一季度|第三季度)报告(?:全文)?(?:[（(][^）)]*(?:修订|更新|更正|修正)[^）)]*[）)])?$", title)
         if (not match or int(match[1]) not in years
                 or any(word in title for word in ("摘要", "英文", "取消", "撤销", "关于", "公告"))):
+            return None
+        report_type = {"年度": "annual", "半年度": "interim", "第一季度": "q1", "第三季度": "q3"}[match[2]]
+        if report_type not in (report_types or ["annual"]):
             return None
         try:
             published = datetime.fromtimestamp(item["announcementTime"] / 1000, SHANGHAI).date()
@@ -171,7 +181,7 @@ class CninfoProvider:
                 or not re.fullmatch(r"finalpage/[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9]+\.[Pp][Dd][Ff]", relative)):
             raise ToolError("SOURCE_INVALID_RESPONSE", "公告缺少有效 PDF 地址。")
         return {"documentId": "cninfo-" + identifier, "title": title, "companyCode": company["code"],
-                "companyName": company["name"], "fiscalYear": int(match[1]), "publishedAt": published.isoformat(),
+                "companyName": company["name"], "fiscalYear": int(match[1]), "reportType": report_type, "publishedAt": published.isoformat(),
                 "provider": self.name, "sourceUrl": STATIC + "/" + relative,
                 "announcementUrl": SITE + "/new/disclosure/detail?" + urlencode({"stockCode": company["code"],
                     "announcementId": identifier, "orgId": company["orgId"], "announcementTime": published.isoformat()}),

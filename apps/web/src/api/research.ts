@@ -22,8 +22,29 @@ export type ModelResearchReport = Omit<MockResearchReport, 'mode' | 'isMock'> & 
     startedAt: string; finishedAt: string; stopReason: 'model_response_received'
   }
 }
-export type ResearchReport = MockResearchReport | ModelResearchReport
-export type ResearchMode = 'mock' | 'model'
+export type EvidenceSource = { sourceId: string; kind: 'document' | 'market'; title: string; url: string; publishedAt: string; pageCount?: number }
+export type ReadCoverage = { sourceId: string; pageCount: number; processedPages: number[]; processedCharacters: number; textComplete: boolean; batches: number; emptyTextPages: number[] }
+export type MarketSeries = { date: string; close: number; adjustedClose: number; volume: number }
+export type MarketData = {
+  provider: string; currency: string; actualStart: string; actualEnd: string; retrievedAt: string
+  series: MarketSeries[]; sourceUrls: string[]; limitations: string[]
+  metrics: { tradingDays: number; firstRawClose: number; lastRawClose: number; adjustedChangePct: number; maxCloseDrawdownPct: number; annualizedDailyVolatilityPct: number | null; drawdownPeakDate: string; drawdownTroughDate: string; formula: string }
+}
+export type AgentResearchReport = ResearchDraft & {
+  mode: 'agent'; isMock: false; asOfDate: string; evidenceStatus: 'retrieved' | 'partial'; title: string; summary: string
+  sections: { heading: string; content: string; citations: { sourceId: string; page?: number | null }[] }[]
+  sources: EvidenceSource[]; coverage: ReadCoverage[]; marketData: MarketData | null; limitations: string[]
+  toolCalls: { toolCallId: string; name: string; status: string; errorCode?: string }[]
+  run: { taskId: string; sessionId: string; status: 'completed' | 'partial'; model: string; stopReason: string; modelCalls: number; steps: number; usage: Record<string, number> }
+}
+export type ResearchJob = {
+  taskId: string; status: 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'; target: string
+  progress: string; modelCalls: number; usage: Record<string, number>; coverage: ReadCoverage[]
+  events: { id: string; parentId: string | null; type: string; message: string; timestamp: string }[]
+  report: AgentResearchReport | null; error: { code: string; message: string } | null
+}
+export type ResearchReport = MockResearchReport | ModelResearchReport | AgentResearchReport
+export type ResearchMode = 'mock' | 'model' | 'agent'
 
 export class ResearchApiError extends Error {
   readonly code: string
@@ -109,7 +130,8 @@ const ERROR_MESSAGES: Record<string, string> = {
 }
 
 /** 浏览器只请求同源 Java API；限制完整响应等待时间，支持主动取消。 */
-export async function generateReport(draft: ResearchDraft, signal: AbortSignal, mode: ResearchMode, asOfDate: string): Promise<ResearchReport> {
+export async function generateReport(draft: ResearchDraft, signal: AbortSignal, mode: ResearchMode, asOfDate: string, onProgress?: (job: ResearchJob) => void): Promise<ResearchReport> {
+  if (mode === 'agent') return generateAgentReport(draft, signal, asOfDate, onProgress)
   const controller = new AbortController()
   let timedOut = false
   const cancel = () => controller.abort()
@@ -152,4 +174,93 @@ export async function generateReport(draft: ResearchDraft, signal: AbortSignal, 
     window.clearTimeout(timer)
     signal.removeEventListener('abort', cancel)
   }
+}
+
+function validSource(source: unknown): source is EvidenceSource {
+  return isObject(source) && typeof source.sourceId === 'string' && typeof source.title === 'string'
+    && typeof source.publishedAt === 'string' && typeof source.url === 'string' && source.url.startsWith('https://') && ['document', 'market'].includes(String(source.kind))
+}
+function validCoverage(value: unknown): value is ReadCoverage {
+  return isObject(value) && typeof value.sourceId === 'string' && Number.isInteger(value.pageCount)
+    && Array.isArray(value.processedPages) && value.processedPages.every(Number.isInteger) && typeof value.textComplete === 'boolean'
+    && typeof value.processedCharacters === 'number' && Number.isInteger(value.batches) && Array.isArray(value.emptyTextPages)
+}
+export function isAgentReport(value: unknown): value is AgentResearchReport {
+  if (!isObject(value) || value.mode !== 'agent' || value.isMock !== false || !['retrieved', 'partial'].includes(String(value.evidenceStatus))) return false
+  if (!['target', 'question', 'userStyle', 'asOfDate', 'title', 'summary'].every((key) => typeof value[key] === 'string')
+    || !Array.isArray(value.omens) || !value.omens.every(isOmen) || !Array.isArray(value.sources) || !value.sources.every(validSource)
+    || !Array.isArray(value.coverage) || !value.coverage.every(validCoverage) || !Array.isArray(value.sections) || value.sections.length < 2
+    || !value.sections.every((s) => isObject(s) && typeof s.heading === 'string' && typeof s.content === 'string' && Array.isArray(s.citations)
+      && s.citations.every((c) => isObject(c) && typeof c.sourceId === 'string' && (c.page == null || Number.isInteger(c.page))))
+    || !Array.isArray(value.limitations) || !value.limitations.every((v) => typeof v === 'string') || !Array.isArray(value.toolCalls)
+    || !value.toolCalls.every((t) => isObject(t) && typeof t.name === 'string' && typeof t.status === 'string' && typeof t.toolCallId === 'string')
+    || !isObject(value.run) || !['completed', 'partial'].includes(String(value.run.status)) || typeof value.run.taskId !== 'string'
+    || typeof value.run.model !== 'string' || typeof value.run.stopReason !== 'string' || typeof value.run.modelCalls !== 'number') return false
+  if (value.marketData !== null) {
+    const data = value.marketData
+    if (!isObject(data) || !Array.isArray(data.series) || data.series.length < 2 || !isObject(data.metrics)
+      || !data.series.every((r) => isObject(r) && typeof r.date === 'string' && typeof r.close === 'number' && Number.isFinite(r.close)
+        && r.close > 0 && typeof r.adjustedClose === 'number' && Number.isFinite(r.adjustedClose) && r.adjustedClose > 0)
+      || !['tradingDays', 'firstRawClose', 'lastRawClose', 'adjustedChangePct', 'maxCloseDrawdownPct'].every((k) => typeof data.metrics === 'object' && typeof (data.metrics as Record<string, unknown>)[k] === 'number')
+      || !['provider', 'currency', 'actualStart', 'actualEnd', 'retrievedAt'].every((k) => typeof data[k] === 'string')
+      || !Array.isArray(data.sourceUrls) || !data.sourceUrls.every((u) => typeof u === 'string' && u.startsWith('https://'))) return false
+  }
+  return true
+}
+
+async function jobRequest(path: string, method: string, signal?: AbortSignal, body?: unknown): Promise<ResearchJob> {
+  let response: Response
+  try {
+    response = await fetch(`/api/research/jobs${path}`, { method, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
+      headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
+  } catch {
+    if (signal?.aborted) throw new ResearchApiError('已停止等待研究。', 'CANCELLED')
+    throw new ResearchApiError('无法读取研究进度。任务可能仍在运行，可点击恢复研究。', 'NETWORK_ERROR')
+  }
+  let result: unknown
+  try { result = await response.json() } catch { throw new ResearchApiError('任务响应无法识别。', 'INVALID_RESPONSE') }
+  if (!response.ok) {
+    if (response.status === 422 && isObject(result)) throw new ResearchApiError('研究输入未通过校验。', 'VALIDATION_ERROR', validationErrors(result))
+    const code = isObject(result) && isObject(result.error) && typeof result.error.code === 'string' ? result.error.code : 'RESEARCH_FAILED'
+    const extra: Record<string, string> = { RESEARCH_BUSY: '已有研究正在运行，请先恢复或停止该任务。', RESEARCH_NOT_FOUND: '任务不存在或服务已重启，请重新开始。' }
+    throw new ResearchApiError(ERROR_MESSAGES[code] || extra[code] || '研究任务未能完成。', code)
+  }
+  if (!isObject(result) || typeof result.taskId !== 'string' || !/^[0-9a-f-]{36}$/i.test(result.taskId)
+    || !['queued', 'running', 'completed', 'partial', 'failed', 'cancelled'].includes(String(result.status))
+    || typeof result.progress !== 'string' || typeof result.modelCalls !== 'number' || !Array.isArray(result.events)
+    || !result.events.every((e) => isObject(e) && typeof e.id === 'string' && typeof e.message === 'string' && typeof e.type === 'string')
+    || !Array.isArray(result.coverage) || !result.coverage.every(validCoverage)
+    || (result.report !== null && !isAgentReport(result.report))) throw new ResearchApiError('任务或报告格式不正确。', 'INVALID_REPORT')
+  return result as ResearchJob
+}
+
+export async function cancelAgentJob(taskId: string) { return jobRequest(`/${taskId}`, 'DELETE') }
+export async function getAgentJob(taskId: string, signal?: AbortSignal) { return jobRequest(`/${taskId}`, 'GET', signal) }
+
+export async function waitForAgent(taskId: string, signal: AbortSignal, onProgress?: (job: ResearchJob) => void): Promise<AgentResearchReport> {
+  try {
+    for (let i = 0; i < 1100; i++) {
+      const job = await jobRequest(`/${taskId}`, 'GET', signal)
+      onProgress?.(job)
+      if (!['queued', 'running'].includes(job.status)) {
+        sessionStorage.removeItem('path-of-market-active-job')
+        if (job.report) return job.report
+        throw new ResearchApiError(job.error?.message || '任务已停止，尚无报告。', job.error?.code || 'RESEARCH_STOPPED')
+      }
+      await new Promise<void>((resolve, reject) => {
+        const cancel = () => { clearTimeout(timer); reject(new ResearchApiError('请求已取消。', 'CANCELLED')) }
+        const timer = window.setTimeout(() => { signal.removeEventListener('abort', cancel); resolve() }, 1500)
+        if (signal.aborted) cancel()
+        else signal.addEventListener('abort', cancel, { once: true })
+      })
+    }
+    throw new ResearchApiError('等待已达上限，可恢复研究查看任务状态。', 'CLIENT_TIMEOUT')
+  } catch (error) { throw error }
+}
+
+async function generateAgentReport(draft: ResearchDraft, signal: AbortSignal, asOfDate: string, onProgress?: (job: ResearchJob) => void) {
+  const job = await jobRequest('', 'POST', signal, { ...draft, asOfDate, includeMarket: true })
+  sessionStorage.setItem('path-of-market-active-job', job.taskId)
+  onProgress?.(job)
+  return waitForAgent(job.taskId, signal, onProgress)
 }

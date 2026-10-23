@@ -6,11 +6,13 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 ## 当前状态
 
-截至 2026-10-23，M0 完整应用骨架、M1-1 模型接口与 M1-2 真实资料工具层已完成。网页经 Java、Python 实际调用 DeepSeek 并展示模型分析；六个工具能自动查找官方年报、下载缓存、连续分批读取全本及重点回查。
+截至 2026-10-24，M0 完整应用骨架、M1-1 至 M1-3 已完成。网页经 Java、Python 运行真实研究 Agent：模型选择工具，自动找报告、分批阅读原文、查询股票日线，再返回带引用和阅读覆盖的研究报告、行情图和计算表。
 
 已初始化本地 Git，分支为 `main`。当前没有配置远程地址，代码和提交先保存在本地。
 
-下一项为 M1-3：把工具接入模型自主研究循环。当前网页仍调用原有未检索资料的模型分析，工具独立可用，尚未在网页报告中使用。所有选定研究资料默认通读，分批处理与覆盖记录按 [核心设计依据](docs/agent-design-decisions.md) 推进。
+下一项为 M1-4：预兆策略与 Agent 行为验收。模型当前使用三个逻辑工具，底层保留七个可复用工具；详见 [M1-3 使用与代码导读](docs/m1-3-agent.md)。中际旭创案例实际处理三份报告共 649 页可提取文字和约 24 个月的 486 个交易日日线。全文文字处理不等于读懂图像/扫描页。
+
+[查看本机已完成案例](http://127.0.0.1:5173/?task=8fc56014-19be-4acb-9120-8b94556f4e6e) 不会重新调用模型。任务目前只保存在 Python 进程内，重启/淘汰后链接失效；该案例 JSON 已另存 `storage/runs/m1-3-zjxc-web-live.json`，聊天工作区另有 Markdown 备份。会话持久化与侧栏聊天按 M2 推进。
 
 ## 自动资料工具（M1-2）
 
@@ -20,7 +22,7 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 .\apps\agent\.venv\Scripts\python.exe .\scripts\try-report-tools.py --company 同花顺 --years 2024 2025 --as-of 2026-10-23 --query 研发投入金额
 ```
 
-此命令分批返回全本文字并演示重点回查，不调用模型账户。结果在 `storage/runs/m1-2-tools.json`；Python `/docs` 也提供工具验收接口。完整阅读不等于把整本一次塞进上下文，也不等于模型已处理；下一步 Runner 记录实际模型处理覆盖。
+此命令分批返回全本文字并演示重点回查，不调用模型账户。结果在 `storage/runs/m1-2-tools.json`；Python `/docs` 也提供底层工具验收接口。CLI 本身不代表模型已处理；网页真实研究的 Runner 会另行调用模型并记录实际处理覆盖。
 
 ## 配置模型密钥
 
@@ -40,13 +42,13 @@ Set-Location 'D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路'
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-app.ps1
 ```
 
-打开 http://127.0.0.1:5173/ ，默认选择“模型分析”，填写问题后点“生成模型分析”。也可切换“演示报告”检查固定报告，不消耗模型额度。服务在后台运行，关闭启动终端后仍可使用；电脑重启后需要重新启动。
+打开 http://127.0.0.1:5173/ ，默认选择“真实研究”，填写问题后提交；它会调用模型与资料/行情工具并消耗模型额度。“模型思路”保留未检索资料的单次分析，“演示报告”可检查固定报告，不消耗模型额度。服务在后台运行，关闭启动终端后仍可使用；电脑重启后需要重新启动。
 
 | 服务 | 端口 | 分工 |
 | --- | --- | --- |
 | React 网页 | 5173 | 输入与展示 |
 | Java 主后端 | 8080 | 接收请求并调用 Python |
-| Python 研究服务 | 8000 | 演示、模型分析与独立资料工具，下一步接动态循环 |
+| Python 研究服务 | 8000 | 模型、动态工具循环、PDF 阅读、行情计算与进程内任务 |
 
 检查三服务与完整基础链路（使用演示接口，不调用模型账户）：
 
@@ -66,7 +68,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-app.ps1
 
 需要分别看日志时，先停止统一入口的应用，再在三个终端分别运行 `scripts/start-agent.ps1`、`scripts/start-server.ps1`、`scripts/start-web.ps1`；在各终端按 Ctrl+C 停止。统一停止脚本不管理单独启动的服务。
 
-Python 自动管理虚拟环境与依赖，网页按锁文件安装依赖，Java 使用 Maven Wrapper 构建。本机已验证 Python 3.14.3、JDK 25.0.2、Node.js 24.13.1 / npm 11.8.0。演示模式无需模型密钥；模型分析需本地 `.env` 配置，当前两种模式均无需数据库。
+Python 自动管理虚拟环境与依赖，网页按锁文件安装依赖，Java 使用 Maven Wrapper 构建。本机已验证 Python 3.14.3、JDK 25.0.2、Node.js 24.13.1 / npm 11.8.0。演示模式无需模型密钥；真实研究和模型思路需本地 `.env` 配置，当前均无需数据库。
 
 原有专项检查仍可使用：
 
@@ -96,7 +98,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 - 大语言模型：先用 DeepSeek API，后续预留其他模型供应商。
 - 数据来源：系统自动发现的公开原始资料、补充上传、后续搜索与行情 Provider。
 
-以上是现有技术路线。Agent 编排库尚未确定；第一步建立服务和数据格式，后续再为真实研究循环选择 SDK 或编排实现。
+以上是现有技术路线。当前采用独立 HTTP 模型适配与轻量 Runner，按 Pi 循环与 DeepSeek 官方工具协议实现；没有引入完整 Pi 或编排库。来源和采用理由见设计决策文档。
 
 ## 应用分层
 
@@ -110,6 +112,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 - `docs/research-runtime-plan.md`：研究上下文、工具循环、记忆、长报告、表格图表与阶段安排。
 - `AGENTS.md`、`docs/agent-design-decisions.md`：核心机制参考成熟实践、JSONL 会话方向、统一资料通读和学习交接。
 - `docs/m1-2-tools.md`：自动查年报、六个工具、连续全本阅读与验收。
+- `docs/m1-3-agent.md`：动态研究循环、三个逻辑工具/七个底层工具、股票行情、真实案例与学习入口。
 - `docs/current-state.md`：当前进度。
 - `docs/task-board.md`：任务板。
 - `docs/dev-workflow.md`：AI 协作开发工作流。
@@ -136,7 +139,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 
 2026-10-12 用户已确认恢复原来的最小闭环：先得到能打开、能输入、能展示演示报告的应用骨架，再接真实模型、资料工具和特色功能。应用架构和产品模块沿用原设计。
 
-2026-10-23 补充确认正式报告需要表格、图表、长文分章、上下文预算与研究检查点；这些仍为后续任务。M1-2 已完成，下一步为 M1-3；选定研究资料默认通读、会话 JSONL 方向与成熟实践依据见 `docs/agent-design-decisions.md`。
+2026-10-24 完成 M1-3 交接，并按用户要求提前接入股票日线、行情图和指标表。示例研究截止日为 2026-10-23。通用财务表图、长文分章、会话 JSONL 落盘、上下文摘要与检查点仍待 M2；下一项是 M1-4。统一资料通读与成熟实践依据见 `docs/agent-design-decisions.md`。
 
 每个里程碑继续拆成小任务；完成一个任务后核查结果、更新进度文档并提交 Git。具体状态以 `docs/current-state.md` 和 `docs/task-board.md` 为准。
 

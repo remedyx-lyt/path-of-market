@@ -5,14 +5,16 @@ from fastapi.responses import RedirectResponse
 
 from app.api.routes.research import router
 from app.api.routes.tools import router as tools_router
+from app.api.routes.jobs import router as jobs_router
 
 app = FastAPI(
     title="Path of Market 研究服务",
-    description="保留演示与模型分析；M1-2 提供官方年报发现、下载与按页读取工具，模型循环在 M1-3 接入。",
-    version="0.3.0",
+    description="保留演示与模型分析；M1-3 支持后台研究、动态工具循环、全文阅读覆盖和日线行情。",
+    version="0.4.0",
 )
 app.include_router(router)
 app.include_router(tools_router)
+app.include_router(jobs_router)
 
 
 @app.get("/", include_in_schema=False)

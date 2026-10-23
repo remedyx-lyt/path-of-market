@@ -1,7 +1,7 @@
 """工具参数和错误约定；资料正文始终是数据，不是执行指令。"""
 
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -25,6 +25,8 @@ class FindArguments(CompanyArguments):
     years: list[Annotated[int, Field(ge=2000, le=2100)]] = Field(min_length=1, max_length=4,
         description="报告所属会计年度，不是披露年份；一次最多四年。")
     as_of_date: str = Field(alias="asOfDate", description="研究截止日期 YYYY-MM-DD；只用该日及之前披露的文件。")
+    report_types: list[Literal["annual", "interim", "q1", "q3"]] = Field(default=["annual"], alias="reportTypes",
+        min_length=1, max_length=4, description="annual 年报、interim 半年报、q1 一季报、q3 三季报；默认完整年报。")
 
     @field_validator("years")
     @classmethod

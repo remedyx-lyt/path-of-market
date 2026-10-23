@@ -10,7 +10,9 @@ router = APIRouter(prefix="/tools", tags=["研究工具（开发验收）"])
 
 @router.get("")
 def list_tools():
-    return {"tools": get_research_tools().declarations(), "modelLoopConnected": False}
+    from app.services.agent_runner import declarations
+    return {"tools": get_research_tools().declarations(), "modelLoopConnected": True,
+            "agentTools": declarations()}
 
 
 @router.post("/execute")

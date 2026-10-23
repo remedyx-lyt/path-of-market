@@ -19,8 +19,8 @@ export type DraftErrors = Partial<Record<'target' | 'question' | 'userStyle' | '
 export const EMPTY_DRAFT: ResearchDraft = { target: '', question: '', userStyle: '', omens: [] }
 
 export const EXAMPLE_DRAFT: ResearchDraft = {
-  target: '示例公司',
-  question: '如何研究这家公司的研发投入变化？哪些机会与风险值得继续验证？',
+  target: '中际旭创',
+  question: '研究最近两年的经营变化，阅读最近两份年报并补充当年已披露的半年报，分析最近约24个月股票价格走势、区间变化、回撤，以及经营与价格之间可能的联系和风险。',
   userStyle: '关注长期增长，同时检查风险和反方证据。',
   omens: ['opportunity', 'abyssal_echoes'],
 }

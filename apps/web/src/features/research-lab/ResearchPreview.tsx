@@ -8,7 +8,7 @@ type Props = { draft: ResearchDraft | null; report: Report | null; isGenerating:
 export function ResearchPreview({ draft, report, isGenerating, hasError }: Props) {
   const status = isGenerating ? '正在获取报告' : hasError ? '生成失败' : report ? '报告已返回' : draft ? '任务已预览' : '等待输入'
   return (
-    <aside className={`research-preview${report ? ' research-preview--report' : ''}`} aria-label={report ? report.mode === 'model' ? '模型分析报告' : '演示研究报告' : '研究任务预览'} aria-busy={isGenerating}>
+    <aside className={`research-preview${report ? ' research-preview--report' : ''}`} aria-label={report ? report.mode === 'agent' ? '真实研究报告' : report.mode === 'model' ? '模型分析报告' : '演示研究报告' : '研究任务预览'} aria-busy={isGenerating}>
       <div className="preview-topline">
         <span className="eyebrow">RESEARCH BRIEF</span>
         <span className={`preview-status${report || draft && !isGenerating && !hasError ? ' preview-status--ready' : ''}`}>

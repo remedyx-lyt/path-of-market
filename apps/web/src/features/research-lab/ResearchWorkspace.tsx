@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { generateReport, ResearchApiError } from '../../api/research'
-import type { ResearchReport, ResearchMode } from '../../api/research'
+import { generateReport, waitForAgent, cancelAgentJob, getAgentJob, ResearchApiError } from '../../api/research'
+import type { ResearchReport, ResearchMode, ResearchJob } from '../../api/research'
 import { ResearchPreview } from './ResearchPreview'
 import { characterCount, EMPTY_DRAFT, EXAMPLE_DRAFT, normalizeDraft, OMENS, validateDraft } from './researchDraft'
 import type { DraftErrors, ReportOmen, ResearchDraft } from './researchDraft'
@@ -12,7 +12,9 @@ export function ResearchWorkspace() {
   const [errors, setErrors] = useState<DraftErrors>({})
   const [message, setMessage] = useState('')
   const [report, setReport] = useState<ResearchReport | null>(null)
-  const [mode, setMode] = useState<ResearchMode>('model')
+  const [mode, setMode] = useState<ResearchMode>('agent')
+  const [job, setJob] = useState<ResearchJob | null>(null)
+  const [resumeId, setResumeId] = useState(() => sessionStorage.getItem('path-of-market-active-job'))
   const [asOfDate, setAsOfDate] = useState(() => {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
@@ -40,6 +42,23 @@ export function ResearchWorkspace() {
 
   useEffect(() => () => { requestRef.current?.abort(); requestRef.current = null }, [])
   useEffect(() => {
+    const taskId = new URLSearchParams(window.location.search).get('task')
+    if (!taskId || !/^[0-9a-f-]{36}$/i.test(taskId)) return
+    const controller = new AbortController()
+    void getAgentJob(taskId, controller.signal).then((next) => {
+      if (controller.signal.aborted || requestRef.current) return
+      setJob(next); setMode('agent')
+      if (next.report) {
+        const result = next.report
+        setReport(result); setDraft({ target: result.target, question: result.question, userStyle: result.userStyle, omens: result.omens })
+        setAsOfDate(result.asOfDate); setResumeId(null); setMessage('已打开研究结果，本次查看不调用模型。')
+      } else {
+        sessionStorage.setItem('path-of-market-active-job', taskId); setResumeId(taskId)
+      }
+    }).catch((error) => { if (!controller.signal.aborted && error instanceof ResearchApiError) setRequestError(error) })
+    return () => controller.abort()
+  }, [])
+  useEffect(() => {
     if (!isGenerating && pendingFocusRef.current) {
       focusErrors(pendingFocusRef.current)
       pendingFocusRef.current = null
@@ -51,6 +70,7 @@ export function ResearchWorkspace() {
     setReport(null)
     setRequestError(null)
     setMessage('')
+    setJob(null)
   }
 
   function updateField(field: 'target' | 'question' | 'userStyle', value: string) {
@@ -70,7 +90,7 @@ export function ResearchWorkspace() {
 
   function prepareDraft() {
     const nextErrors = validateDraft(draft)
-    if (mode === 'model' && (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate) || Number.isNaN(Date.parse(asOfDate)))) nextErrors.asOfDate = '请填写有效的研究截止日期。'
+    if (mode !== 'mock' && (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate) || Number.isNaN(Date.parse(asOfDate)))) nextErrors.asOfDate = '请填写有效的研究截止日期。'
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length) {
       setPreview(null)
@@ -103,11 +123,14 @@ export function ResearchWorkspace() {
     setMessage('')
     setIsGenerating(true)
     try {
-      const result = await generateReport(prepared, controller.signal, mode, asOfDate)
+      const result = await generateReport(prepared, controller.signal, mode, asOfDate, (next) => {
+        if (requestRef.current === controller) { setJob(next); setResumeId(next.taskId) }
+      })
       if (requestRef.current !== controller) return
       setReport(result)
       setPreview({ target: result.target, question: result.question, userStyle: result.userStyle, omens: result.omens })
-      setMessage(result.mode === 'model' ? '模型分析已返回；本次未检索真实资料。' : '演示报告已返回，尚未进行真实资料研究。')
+      setMessage(result.mode === 'agent' ? result.run.status === 'completed' ? '研究已完成，可查看来源、阅读覆盖与行情。' : '研究部分完成，请查看停止原因与资料缺口。' : result.mode === 'model' ? '模型分析已返回；本次未检索真实资料。' : '演示报告已返回，尚未进行真实资料研究。')
+      if (result.mode === 'agent') setResumeId(null)
     } catch (error) {
       if (requestRef.current !== controller) return
       const failure = error instanceof ResearchApiError ? error : new ResearchApiError('报告生成失败，请稍后重试。', 'UNKNOWN_ERROR')
@@ -122,6 +145,26 @@ export function ResearchWorkspace() {
     }
   }
 
+  async function resumeResearch() {
+    if (!resumeId || requestRef.current) return
+    const controller = new AbortController()
+    requestRef.current = controller
+    setIsGenerating(true); setRequestError(null); setMode('agent')
+    try {
+      const result = await waitForAgent(resumeId, controller.signal, (next) => { if (requestRef.current === controller) setJob(next) })
+      if (requestRef.current !== controller) return
+      setReport(result); setDraft({ target: result.target, question: result.question, userStyle: result.userStyle, omens: result.omens })
+      setAsOfDate(result.asOfDate); setResumeId(null); setMessage('已恢复研究结果，请查看来源与完成范围。')
+    } catch (error) {
+      if (requestRef.current !== controller) return
+      const failure = error instanceof ResearchApiError ? error : new ResearchApiError('无法恢复研究。', 'RESEARCH_FAILED')
+      setRequestError(failure)
+      if (failure.code === 'RESEARCH_NOT_FOUND') { sessionStorage.removeItem('path-of-market-active-job'); setResumeId(null) }
+    } finally {
+      if (requestRef.current === controller) { requestRef.current = null; setIsGenerating(false) }
+    }
+  }
+
   function fillExample() {
     setDraft({ ...EXAMPLE_DRAFT, omens: [...EXAMPLE_DRAFT.omens] })
     invalidateResult()
@@ -133,12 +176,18 @@ export function ResearchWorkspace() {
   function reset() {
     const wasGenerating = requestRef.current !== null
     requestRef.current?.abort()
+    const stoppingId = job?.taskId || resumeId
+    if (stoppingId) void cancelAgentJob(stoppingId).then(() => sessionStorage.removeItem('path-of-market-active-job')).catch(() => {
+      sessionStorage.setItem('path-of-market-active-job', stoppingId); setResumeId(stoppingId)
+      setMessage('已停止等待；取消未确认，可恢复研究核对任务状态。')
+    })
     requestRef.current = null
     pendingFocusRef.current = null
     setIsGenerating(false)
     setDraft({ ...EMPTY_DRAFT })
     invalidateResult()
     setErrors({})
+    setResumeId(null)
     setMessage(wasGenerating ? '已取消请求并清空研究任务。' : '已清空研究任务。')
     targetRef.current?.focus()
   }
@@ -158,11 +207,11 @@ export function ResearchWorkspace() {
           </div>
           <fieldset className="mode-selector" disabled={isGenerating}>
             <legend>生成方式</legend>
-            {([{ value: 'model', label: '模型分析' }, { value: 'mock', label: '演示报告' }] as const).map((option) => (
+            {([{ value: 'agent', label: '真实研究' }, { value: 'model', label: '模型思路' }, { value: 'mock', label: '演示报告' }] as const).map((option) => (
               <label key={option.value}><input type="radio" name="researchMode" value={option.value} checked={mode === option.value}
                 onChange={() => { setMode(option.value); setErrors({}); invalidateResult() }} />{option.label}</label>
             ))}
-            <p>{mode === 'model' ? '调用模型生成研究思路，本阶段尚未检索资料。' : '使用固定内容检查应用，不调用模型。'}</p>
+            <p>{mode === 'agent' ? '自动获取报告、分批阅读并分析行情，需要多次模型调用；进度会持续显示。' : mode === 'model' ? '调用模型生成研究思路，不检索资料。' : '使用固定内容检查应用，不调用模型。'}</p>
           </fieldset>
           <div className="form-field">
             <label htmlFor="research-target">研究对象 <span>必填</span></label>
@@ -237,10 +286,17 @@ export function ResearchWorkspace() {
             </div>
           </details>
           <div className="form-actions">
-            <button className="primary-button" type="submit" disabled={isGenerating}>{isGenerating ? '正在获取报告…' : mode === 'model' ? '生成模型分析' : '生成演示报告'} <span aria-hidden="true">→</span></button>
+            <button className="primary-button" type="submit" disabled={isGenerating}>{isGenerating ? '研究进行中…' : mode === 'agent' ? '开始真实研究' : mode === 'model' ? '生成模型分析' : '生成演示报告'} <span aria-hidden="true">→</span></button>
             <button className="secondary-button" type="button" onClick={previewTask} disabled={isGenerating}>预览任务</button>
             <button className="secondary-button" type="button" onClick={reset}>{isGenerating ? '取消并清空' : '清空'}</button>
           </div>
+          {resumeId && !isGenerating && <button className="text-button" type="button" onClick={() => void resumeResearch()}>恢复上次研究 ↗</button>}
+          {job && <div className="research-progress" aria-live="polite">
+            <strong>{job.progress}</strong>
+            <p>模型调用 {job.modelCalls} 次{typeof job.usage.total_tokens === 'number' ? ` · 累计 ${job.usage.total_tokens.toLocaleString()} token` : ''}</p>
+            {job.coverage.map((entry) => <p key={entry.sourceId}>{entry.processedPages.length}/{entry.pageCount} 页文本已处理{entry.textComplete ? ' · 文本阅读完成' : ''}</p>)}
+            <details><summary>查看最近动作</summary><ol>{job.events.slice(-8).map((entry) => <li key={entry.id}>{entry.message}</li>)}</ol></details>
+          </div>}
           {requestError && <div className="request-error" role="alert"><strong>报告未生成</strong><p>{requestError.message}</p></div>}
           <p className="form-message" role="status">{message || (isGenerating ? '正在等待研究服务返回报告。' : '可先预览任务，也可以直接生成报告。')}</p>
         </form>

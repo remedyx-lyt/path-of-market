@@ -146,3 +146,27 @@ button:disabled { opacity: 0.55; cursor: wait; }
 .mode-selector input { accent-color: #111; }
 .mode-selector p, .report-limitations p { margin: 4px 0 0; font-size: 13px; line-height: 1.7; opacity: 0.72; }
 .report-limitations { margin-top: 20px; padding-top: 16px; border-top: 1px solid #555; }
+.research-progress { margin-top: 18px; padding: 16px 0; border-top: 1px solid #d8d8d4; font-size: 13px; line-height: 1.8; }
+.research-progress p { margin: 6px 0; color: #666; }
+.research-progress ol { padding-left: 20px; color: #666; font-size: 12px; }
+.research-progress summary { cursor: pointer; }
+.market-section { margin-top: 24px; padding-bottom: 24px; border-bottom: 1px solid #484844; }
+.market-section h3 { font-size: 17px; margin: 0 0 8px; }
+.market-caption { color: #aaa; font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
+.market-section svg { display: block; width: 100%; height: auto; margin-top: 16px; overflow: visible; }
+.chart-switch { display: flex; flex-wrap: wrap; gap: 8px; }
+.chart-switch button { background: transparent; color: #bbb; padding: 6px 10px; border: 1px solid #555; border-radius: 4px; font-size: 11px; }
+.chart-switch button[aria-pressed="true"] { color: #111; background: #eee; border-color: #eee; }
+.chart-cursor { display: block; color: #bbb; font-size: 11px; line-height: 1.8; margin: 8px 0 20px; }
+.chart-cursor input { width: 100%; accent-color: #70d6bd; }
+.table-scroll { width: 100%; overflow-x: auto; }
+.research-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.8; }
+.research-table caption { text-align: left; padding-bottom: 8px; color: #aaa; }
+.research-table th, .research-table td { padding: 9px 8px; border-bottom: 1px solid #484844; text-align: left; }
+.research-table th { font-weight: 400; color: #aaa; }
+.research-table td { font-variant-numeric: tabular-nums; }
+.section-citations { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.section-citations a, .report-evidence a { color: #b9dbce; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: 3px; }
+.report-evidence ol { padding-left: 18px; }
+.report-evidence li { margin: 12px 0; }
+.report-evidence li p { margin-top: 2px; }

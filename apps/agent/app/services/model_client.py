@@ -12,7 +12,7 @@ from app.schemas.research import ModelContent
 MAX_RESPONSE_BYTES = 1_048_576
 
 
-def _request(settings: ModelSettings, messages: list[dict[str, str]]) -> tuple[ModelContent, dict[str, int]]:
+def _request_payload(settings: ModelSettings, payload: dict) -> dict:
     url = urlsplit(settings.base_url)
     connection_class = http.client.HTTPSConnection if url.scheme == "https" else http.client.HTTPConnection
     connection = connection_class(url.hostname, url.port, timeout=min(10, settings.timeout_seconds))
@@ -30,9 +30,6 @@ def _request(settings: ModelSettings, messages: list[dict[str, str]]) -> tuple[M
                 connection.sock.settimeout(seconds)
 
         remaining()
-        payload = {"model": settings.model, "messages": messages, "stream": False,
-                   "thinking": {"type": "disabled"}, "max_tokens": settings.max_tokens,
-                   "response_format": {"type": "json_object"}}
         connection.request("POST", url.path.rstrip("/") + "/chat/completions",
                            body=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                            headers={"Authorization": f"Bearer {settings.api_key}",
@@ -60,14 +57,9 @@ def _request(settings: ModelSettings, messages: list[dict[str, str]]) -> tuple[M
                 raise ValueError
             chunks.append(chunk)
         body = json.loads(b"".join(chunks))
-        choice = body["choices"][0]
-        if choice.get("finish_reason") != "stop" or choice["message"].get("tool_calls"):
+        if not isinstance(body, dict):
             raise ValueError
-        content = ModelContent.model_validate_json(choice["message"]["content"])
-        usage = body.get("usage") or {}
-        counts = {name: value for name in ("prompt_tokens", "completion_tokens", "total_tokens")
-                  if type(value := usage.get(name)) is int and value >= 0}
-        return content, counts
+        return body
     except ModelServiceError:
         raise
     except (TimeoutError, socket.timeout):
@@ -82,9 +74,55 @@ def _request(settings: ModelSettings, messages: list[dict[str, str]]) -> tuple[M
         connection.close()
 
 
-async def generate_content(settings: ModelSettings, messages: list[dict[str, str]]) -> tuple[ModelContent, dict[str, int]]:
+async def complete_turn(settings: ModelSettings, messages: list[dict], *, tools: list | None = None,
+                        max_tokens: int | None = None, json_mode: bool = True) -> tuple[dict, dict]:
+    """标准 assistant/tool 协议；工具执行留给 Runner，截断的工具参数不执行。"""
+    payload = {"model": settings.model, "messages": messages, "stream": False,
+               "thinking": {"type": "disabled"}, "max_tokens": max_tokens or settings.max_tokens}
+    if tools:
+        payload.update(tools=tools, tool_choice="auto")
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
     try:
         async with asyncio.timeout(settings.timeout_seconds):
-            return await asyncio.to_thread(_request, settings, messages)
+            body = await asyncio.to_thread(_request_payload, settings, payload)
+        choice = body["choices"][0]
+        message = choice["message"]
+        calls = message.get("tool_calls") or []
+        if (choice.get("finish_reason") not in {"stop", "tool_calls"} or not isinstance(calls, list)
+                or len(calls) > 6 or calls and (not tools or choice.get("finish_reason") != "tool_calls")
+                or not calls and choice.get("finish_reason") != "stop"):
+            raise ValueError
+        clean = {"role": "assistant", "content": message.get("content")}
+        if clean["content"] is not None and not isinstance(clean["content"], str):
+            raise ValueError
+        if calls:
+            normalized, ids = [], set()
+            for call in calls:
+                identifier, function = call["id"], call["function"]
+                if (not isinstance(identifier, str) or not 1 <= len(identifier) <= 200 or identifier in ids
+                        or call.get("type") != "function" or not isinstance(function["name"], str)
+                        or not isinstance(function["arguments"], str) or len(function["arguments"]) > 16000):
+                    raise ValueError
+                ids.add(identifier)
+                normalized.append({"id": identifier, "type": "function", "function":
+                                   {"name": function["name"], "arguments": function["arguments"]}})
+            clean["tool_calls"] = normalized
+        elif not clean["content"]:
+            raise ValueError
+        usage = body.get("usage") or {}
+        counts = {name: value for name in ("prompt_tokens", "completion_tokens", "total_tokens")
+                  if type(value := usage.get(name)) is int and value >= 0}
+        return clean, counts
     except TimeoutError:
         raise ModelServiceError("MODEL_TIMEOUT", "模型响应超时，请重试或缩短问题。", 504) from None
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        raise ModelServiceError("MODEL_INVALID_RESPONSE", "模型未返回完整且有效的工具消息或内容。", 502) from None
+
+
+async def generate_content(settings: ModelSettings, messages: list[dict[str, str]]) -> tuple[ModelContent, dict[str, int]]:
+    message, usage = await complete_turn(settings, messages)
+    try:
+        return ModelContent.model_validate_json(message["content"]), usage
+    except ValueError:
+        raise ModelServiceError("MODEL_INVALID_RESPONSE", "模型未返回完整且有效的报告，请重试或调整输出长度。", 502) from None
