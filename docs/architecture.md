@@ -26,6 +26,12 @@ Path of Market（市场之路）是一个包含研究 Agent 的个人财经研�
 | `apps/server` | Java + Spring Boot | 主 API、数据库、用户画像、研究日志、观察池、任务状态 |
 | `apps/agent` | Python + FastAPI | LLM 调用、RAG、文档解析、工具调用、Agent 工作流 |
 
+## 研究运行架构与报告能力
+
+`research-runtime-plan.md` 将现有分层进一步拆为 ContextBuilder、ModelAdapter、ToolRegistry/Executor、Runner、研究状态与记忆、ReportComposer 和图表渲染。各部件标明当前状态与实施阶段；这是补充设计，三应用架构与原阶段顺序不变。
+
+正式研究报告需要有来源的表格与图表，长报告采用分章生成、保存、整合和续写。上下文窗口、单次输出与整份研究预算分别管理；当前 M1-1 的短 JSON 与单次 token 校验不是最终报告规格。
+
 ## 关键原则
 
 - 前端通常只调用 Java 主后端，不直接调用 Python Agent 服务。
@@ -93,7 +99,7 @@ Java 可以独立启动，健康检查只检测 Java 自身。M0-3 已在现有�
 
 研究字段继续由 Python 统一校验；Java 保留 JSON 原始类型并转发 422 校验详情。Java 控制服务地址、连接和完整响应等待上限，拒绝异常返回结构，提供明确的服务不可用、超时和上游错误响应。详见 `third-step.md`。
 
-当前后端链路与网页报告接入均已完成，尚未接模型或真实研究工具。
+当前后端链路与网页报告接入均已完成；后续 M1-1 已接模型，真实研究工具仍待 M1-2。
 
 ## M0-4：已完成的 React 页面
 

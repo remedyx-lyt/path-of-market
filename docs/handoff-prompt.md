@@ -11,6 +11,7 @@ D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路
 请先阅读：
 - README.md
 - docs/architecture.md
+- docs/research-runtime-plan.md（运行架构、长报告与表图要求）
 - docs/product-plan.md
 - docs/agent-concepts.md
 - docs/current-state.md
@@ -64,6 +65,7 @@ M0 内部顺序：Python 演示接口 -> Java 启动与调用 -> 网页输入与
 如果用户本次只要求检查或规划，不进行业务实现。
 
 截至 2026-10-23，M0-1 至 M0-6、M1-1 均已完成，网页已通过 Java/Python 实际调用 DeepSeek，模型分析明确未检索资料；当前下一项为 M1-2。本地 `.env` 已配置，读取和检查时不要输出或提交密钥。
+正式研究报告的表格、图表、长文分章与上下文/检查点要求已补进计划，仍按 M1-2 → M1-3 → M1-4 → M2 顺序逐项实施。
 M1 的真实 Agent 任务必须单独验证模型选择工具、依据结果补查或结束；不虚构来源或工具记录。
 
 完成后运行对应检查，更新 docs/current-state.md 和 docs/task-board.md，检查 Git diff 并提交本任务改动。

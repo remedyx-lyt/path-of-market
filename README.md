@@ -97,6 +97,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 ## 项目协作记忆
 
 - `docs/architecture.md`：架构说明。
+- `docs/research-runtime-plan.md`：研究上下文、工具循环、记忆、长报告、表格图表与阶段安排。
 - `docs/current-state.md`：当前进度。
 - `docs/task-board.md`：任务板。
 - `docs/dev-workflow.md`：AI 协作开发工作流。
@@ -122,6 +123,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 4. **M3：特色功能。** 逐步实现板块地图、追猎者、锐眼和研究 Skill。
 
 2026-10-12 用户已确认恢复原来的最小闭环：先得到能打开、能输入、能展示演示报告的应用骨架，再接真实模型、资料工具和特色功能。应用架构和产品模块沿用原设计。
+
+2026-10-23 补充确认正式报告需要表格和图表，支持长文分章、上下文预算与研究检查点；详见 `docs/research-runtime-plan.md`。这些要求纳入后续任务，下一步仍是 M1-2 真实资料与基础工具。
 
 每个里程碑继续拆成小任务；完成一个任务后核查结果、更新进度文档并提交 Git。具体状态以 `docs/current-state.md` 和 `docs/task-board.md` 为准。
 

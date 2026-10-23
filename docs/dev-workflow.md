@@ -97,6 +97,7 @@ M0 依次完成 Python 演示服务、Java 调用、网页展示；先看到完�
 | 文档 | 指导什么 |
 | --- | --- |
 | `docs/architecture.md` | 职责边界：网页、Java、Python 各自做什么 |
+| `docs/research-runtime-plan.md` | 上下文、工具循环、记忆、长报告与表图的目标和阶段，区分已实现与待做 |
 | `docs/task-board.md` | 已确定的任务顺序和下一项任务 |
 | `docs/current-state.md` | 实际完成内容、检查结果与待做状态 |
 | `docs/first-step.md` | M0-1 的接口、字段、文件范围和验收标准 |
