@@ -30,10 +30,23 @@ export type MarketData = {
   series: MarketSeries[]; sourceUrls: string[]; limitations: string[]
   metrics: { tradingDays: number; firstRawClose: number; lastRawClose: number; adjustedChangePct: number; maxCloseDrawdownPct: number; annualizedDailyVolatilityPct: number | null; drawdownPeakDate: string; drawdownTroughDate: string; formula: string }
 }
+export type FinancialRow = {
+  year: number; periodLabel: string; values: Record<string, number>
+  yoy: Record<string, { value: number | null; reason: string }>
+  evidence: Record<string, { sourceId: string; page: number; rawValue: string; unit: string; verification: string }>
+}
+export type FinancialData = {
+  schemaVersion: 1; datasets: { id: string; label: string; rows: FinancialRow[] }[]
+  charts: { id: string; datasetId: string; title: string; type: 'bar' | 'line'; keys: string[]; valueKind: 'amount' | 'yoy' | 'ratio'; unit: string }[]
+  labels: Record<string, string>; gaps: string[]; method: string
+}
 export type AgentResearchReport = ResearchDraft & {
   mode: 'agent'; isMock: false; asOfDate: string; evidenceStatus: 'retrieved' | 'partial'; title: string; summary: string
   sections: { heading: string; content: string; citations: { sourceId: string; page?: number | null }[] }[]
   sources: EvidenceSource[]; coverage: ReadCoverage[]; marketData: MarketData | null; limitations: string[]
+  financialData?: FinancialData | null
+  researchSkill?: { name: string; version: string; upstream: string }
+  visualReadings?: { sourceId: string; pages: number[]; origin: string; cacheReused: boolean; observations: { page: number; summary: string; uncertainties: string[] }[] }[]
   toolCalls: { toolCallId: string; name: string; status: string; errorCode?: string }[]
   run: { taskId: string; sessionId: string; status: 'completed' | 'partial'; model: string; stopReason: string; modelCalls: number; steps: number; usage: Record<string, number> }
 }
@@ -205,7 +218,43 @@ export function isAgentReport(value: unknown): value is AgentResearchReport {
       || !['provider', 'currency', 'actualStart', 'actualEnd', 'retrievedAt'].every((k) => typeof data[k] === 'string')
       || !Array.isArray(data.sourceUrls) || !data.sourceUrls.every((u) => typeof u === 'string' && u.startsWith('https://'))) return false
   }
+  if (value.financialData != null && !validFinancialData(value.financialData, value.sources as EvidenceSource[])) return false
+  if (value.researchSkill != null && (!isObject(value.researchSkill) || !['name','version','upstream'].every((k) => typeof (value.researchSkill as Record<string,unknown>)[k] === 'string'))) return false
+  if (value.visualReadings != null && (!Array.isArray(value.visualReadings) || !value.visualReadings.every((r) => isObject(r)
+    && typeof r.sourceId === 'string' && Array.isArray(r.pages) && r.pages.every((p) => Number.isInteger(p) && Number(p) > 0)
+    && Array.isArray(r.observations) && r.observations.every((o) => isObject(o) && Number.isInteger(o.page) && typeof o.summary === 'string'
+      && Array.isArray(o.uncertainties) && o.uncertainties.every((u) => typeof u === 'string'))))) return false
   return true
+}
+
+function validFinancialData(data: unknown, sources: EvidenceSource[]): data is FinancialData {
+  const keys = new Set(['revenue','netProfit','recurringProfit','operatingCashFlow','totalAssets','netAssets','rdExpense','attributableMargin'])
+  if (!isObject(data) || data.schemaVersion !== 1 || !Array.isArray(data.datasets) || data.datasets.length > 4
+    || !isObject(data.labels) || !Object.values(data.labels).every((s) => typeof s === 'string')
+    || typeof data.method !== 'string' || !Array.isArray(data.gaps) || !data.gaps.every((g) => typeof g === 'string')) return false
+  const ids = new Set<string>()
+  for (const dataset of data.datasets) {
+    if (!isObject(dataset) || typeof dataset.id !== 'string' || !['annual','h1','q1','q3'].includes(dataset.id) || ids.has(dataset.id)
+      || typeof dataset.label !== 'string' || !Array.isArray(dataset.rows) || dataset.rows.length > 3) return false
+    ids.add(dataset.id)
+    let previous = 0
+    for (const row of dataset.rows) {
+      if (!isObject(row) || typeof row.periodLabel !== 'string' || typeof row.year !== 'number' || !Number.isInteger(row.year) || row.year <= previous
+        || !isObject(row.values) || !isObject(row.yoy) || !isObject(row.evidence)) return false
+      previous = row.year
+      if (!Object.entries(row.values).every(([k,v]) => keys.has(k) && typeof v === 'number' && Number.isFinite(v))) return false
+      if (!Object.entries(row.yoy).every(([k,v]) => keys.has(k) && isObject(v) && typeof v.reason === 'string'
+        && (v.value === null || typeof v.value === 'number' && Number.isFinite(v.value)))) return false
+      if (!Object.entries(row.evidence).every(([k,e]) => keys.has(k) && isObject(e) && Number.isInteger(e.page) && Number(e.page) > 0
+        && typeof e.rawValue === 'string' && ['元','万元','亿元'].includes(String(e.unit)) && typeof e.verification === 'string'
+        && sources.some((s) => s.kind === 'document' && s.sourceId === e.sourceId && Number(e.page) <= Number(s.pageCount)))) return false
+      if (!Object.keys(row.values).every((k) => k === 'attributableMargin' || Object.hasOwn(row.evidence as object,k))) return false
+    }
+  }
+  return Array.isArray(data.charts) && data.charts.length <= 16 && data.charts.every((c) => isObject(c) && typeof c.id === 'string'
+    && typeof c.title === 'string' && ids.has(String(c.datasetId)) && ['bar','line'].includes(String(c.type))
+    && ['amount','yoy','ratio'].includes(String(c.valueKind)) && ['亿元','%'].includes(String(c.unit))
+    && Array.isArray(c.keys) && c.keys.length > 0 && c.keys.length <= 3 && c.keys.every((k) => typeof k === 'string' && keys.has(k)))
 }
 
 async function jobRequest(path: string, method: string, signal?: AbortSignal, body?: unknown): Promise<ResearchJob> {

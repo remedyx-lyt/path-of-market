@@ -195,7 +195,7 @@ class ToolChecks(unittest.TestCase):
 
     def test_09_schema_declarations(self):
         declarations = self.tools.declarations()
-        self.assertEqual(len(declarations), 7)
+        self.assertEqual(len(declarations), 8)
         schema = next(d for d in declarations if d["function"]["name"] == "find_documents")["function"]["parameters"]
         self.assertIn("asOfDate", schema["required"])
         self.assertFalse(schema["additionalProperties"])
@@ -219,7 +219,7 @@ class ToolChecks(unittest.TestCase):
                 self.assertTrue(server.started)
                 base = f"http://127.0.0.1:{port}"
                 with urlopen(base + "/tools", timeout=5) as response:
-                    self.assertEqual(len(json.load(response)["tools"]), 7)
+                    self.assertEqual(len(json.load(response)["tools"]), 8)
                 with urlopen(Request(base + "/tools/execute", data=json.dumps({"name": "find_documents", "arguments":
                         {"company": "同花顺", "years": [2024], "asOfDate": "2026-10-23"}}).encode(),
                         headers={"Content-Type": "application/json"}), timeout=5) as response:

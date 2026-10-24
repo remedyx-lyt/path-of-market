@@ -193,7 +193,7 @@ export function ResearchWorkspace() {
   }
 
   return (
-    <div className="workspace-layout">
+    <div className={`workspace-layout${report?.mode === 'agent' ? ' workspace-layout--report' : ''}`}>
       <section className="research-input" aria-labelledby="workspace-title">
         <div className="workspace-intro">
           <p className="eyebrow">深研室 <span>/</span> THE RESEARCH LAB</p>

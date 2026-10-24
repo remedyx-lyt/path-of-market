@@ -55,6 +55,8 @@ D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路\docs\design-style.md�
 
 Agent 核心机制（会话、Context、工具、循环、压缩和恢复）必须先参考成熟开源实现或官方文档，记录在 `agent-design-decisions.md`；用户已选择 JSONL 追加会话与父节点分支方向。完成后提供学习交接：逐项工具/组件名称、用途、可点击代码位置、调用关系、实际接线状态。统一资料阅读规则与完整约定见根目录 `AGENTS.md`。
 
+本轮按用户要求直接保留第三方金融Skill：原件、LICENSE、固定上游版本和逐文件哈希放 `third_party/`，本项目产品适配放 `apps/agent/skills/`。不得在维护时重写原件、自动运行参考脚本或把“文件已保留”写成“所有工具已实现”；详见 `financial-research-skill.md`。
+
 ## 当前实施顺序与范围
 
 2026-10-12 用户已确认顺序：M0 完整应用骨架 → M1 真实研究 Agent → M2 研究积累与资料完善 → M3 特色功能。

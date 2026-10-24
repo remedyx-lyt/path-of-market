@@ -1,0 +1,189 @@
+{
+  "repository": "https://github.com/anthropics/financial-services",
+  "commit": "574ed3624aebd0418c7e96cd101262f30210ab26",
+  "retrievedAt": "2026-10-24",
+  "license": "Apache-2.0",
+  "modifications": "none; originals retained byte-for-byte",
+  "files": [
+    {
+      "path": "LICENSE",
+      "gitBlobSha": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/catalyst-calendar/SKILL.md",
+      "gitBlobSha": "af2ccb6bf1733c9a6d8df01e05a2b5805ed35000",
+      "sha256": "12ac4ae7659ab848a8910dfceadab5b21479f23c8d3e0c57a3f5bf814bcf8186"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/earnings-analysis/SKILL.md",
+      "gitBlobSha": "447de2f9ec277f976eb2b52501465250c80e1adf",
+      "sha256": "4db857c27a53141b6ebc38ec9ee7f0020dec59cab084ae6753e53366d118c8ee"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/earnings-analysis/references/best-practices.md",
+      "gitBlobSha": "3684a189ea38230ffc195e47a18a4893e2caeb37",
+      "sha256": "a688e6b53d408fcfc36cb5490e9e2a75b82789f876f14ba22119bf19db655d09"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/earnings-analysis/references/report-structure.md",
+      "gitBlobSha": "0dfdb2be551b68dc828ef0526f3b59e1dcf399ce",
+      "sha256": "60da5bd7cde0d93f197d21618bf801978022c4b24b91f2ed9ba21eb2945dc586"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/earnings-analysis/references/workflow.md",
+      "gitBlobSha": "7c170e5e2d4783c231d2313650aacebb625c0fe8",
+      "sha256": "c8922b00e1f7fbbb23afc7601430bbb9c8bf0ac995f478bdd3b368aad6cf0a01"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/earnings-preview/SKILL.md",
+      "gitBlobSha": "555d593882e86885e4a8c11328fcbfd299c5a764",
+      "sha256": "a30d383a6f1c06b732b4d34e422dd2ff18f6340db67229a3347d057d52697f33"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/idea-generation/SKILL.md",
+      "gitBlobSha": "2dc90ce59e15cce9a811ef22ac2484a391c1f63e",
+      "sha256": "e5f49f0f513fc434bb3448c8a942f6f99f66457e425a65b9375bb230922e9a45"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/initiating-coverage/SKILL.md",
+      "gitBlobSha": "122d5d1439829701f10d7ac476fe0a4b3ba075e0",
+      "sha256": "9d21c6e460bc3692e19eeda6dc6d425a704b21243bd28af7f13b6f1dd888ed63"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/initiating-coverage/assets/quality-checklist.md",
+      "gitBlobSha": "75328ab0faeff96e3ac7969562b0d25471e98b5f",
+      "sha256": "1bb73c5420e56b3e01109a883ee22ae5b3bacff40722697f4c3fbb070feff913"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/initiating-coverage/assets/report-template.md",
+      "gitBlobSha": "fe14358cde5abeb8db5df7550bc7e61ca8782d64",
+      "sha256": "7b9c98e9fde6622e111b6ec046d2933bf8bad4d17ba3b385a59a30f16e8cc9e4"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/initiating-coverage/references/task1-company-research.md",
+      "gitBlobSha": "ab8c0e60f733d3b8fed2a2e3aa53defa8e2c5d2a",
+      "sha256": "00ec47ca64c1cfdf6e1b74fa8c693633b5e12e98264667b40f2d7dea90b48227"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/initiating-coverage/references/task2-financial-modeling.md",
+      "gitBlobSha": "9100e2bec2610d54d12d3576d9a11368ff7d23a2",
+      "sha256": "8e2d203984b37953fd0dc0e9b2dd23ed5aadafd68037e8ff29a0f86d3d3cecc0"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/initiating-coverage/references/task3-valuation.md",
+      "gitBlobSha": "623bac7ca18df14eec36e35fa57dd63873328277",
+      "sha256": "07e0f13d90f7ee7160b01717d7975516fdfe8811953c152dd4c8f2e7137219d8"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/initiating-coverage/references/task4-chart-generation.md",
+      "gitBlobSha": "24cb5729512b5462331a2bf380fadabaf8908155",
+      "sha256": "ab5be625db0687b3fa85ce9177f2f52b7ab7c5127e80c3e2c905a5821602554e"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/initiating-coverage/references/task5-report-assembly.md",
+      "gitBlobSha": "bae6bce5b156ea94d6318f068efaf9858631c7ce",
+      "sha256": "7e2f2ccc6bfb54a4be247cd29a9aa95df20a624bb82243980d4f31412e7172ed"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/initiating-coverage/references/valuation-methodologies.md",
+      "gitBlobSha": "3bccca44d9e5347ead89db76a79d14b4354bf70e",
+      "sha256": "fed84dc2b45794cf2abd682db8f346820d61c316cbcd058ec386ea51351f1633"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/model-update/SKILL.md",
+      "gitBlobSha": "dc90f5948f7efff2ff0c17c6cfefd67505e0ca81",
+      "sha256": "62b2256bf3b52ac3759cb446a10aaa3066a51b4909e09bae0e3b98b741a37fb5"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/morning-note/SKILL.md",
+      "gitBlobSha": "966dc05bb3f1f719ce0be733b263180a3b0b7bdf",
+      "sha256": "38f0b36cd414bb0b702bdef0f7f3d53480f8338f8495286d7ebb012f0a92774c"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/sector-overview/SKILL.md",
+      "gitBlobSha": "edd4cf59305095b46b6feb580271a772fdfd1a59",
+      "sha256": "8d4b7b47c3fe1591bde0a4260b1ffbe489e7ddbe3eddd3dbeb046ce29f315608"
+    },
+    {
+      "path": "plugins/vertical-plugins/equity-research/skills/thesis-tracker/SKILL.md",
+      "gitBlobSha": "f9a3ce9187bdc3410d3f4f3713ce70a6f6b8f221",
+      "sha256": "6b4ce2967c5e01c6b42f5c140fa1e94dee2713b5d2de3eb71957ff5a5c11469b"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/3-statement-model/SKILL.md",
+      "gitBlobSha": "01bcfe1d0db56ab910400531c280735cd118d734",
+      "sha256": "bc2aeb423a3cc9e6ab973dcc4e3c6682427c751e20d8b3a0eec057eab67b1e83"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/3-statement-model/references/formatting.md",
+      "gitBlobSha": "1fbe938c1623ea73c9707b15775f0f92e21c948f",
+      "sha256": "7e1c5ca7dd566f6821a6094efcbe48913d984766d7278178111ec4c67aca8778"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/3-statement-model/references/formulas.md",
+      "gitBlobSha": "db2645727e258a4543c13925dab3c0ced7d40d90",
+      "sha256": "5761041366248bba14782f72082b9396c7e47291491999ea85be1c9c2875df5e"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/3-statement-model/references/sec-filings.md",
+      "gitBlobSha": "e0fa48453a151a8d6770dda9c8b2ecede0fe363b",
+      "sha256": "9765c2f789b8d87baeca89b7f3a5ddc68d6068c06b39b4445224197d6e444e93"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/audit-xls/SKILL.md",
+      "gitBlobSha": "a2cae1d11c5e6704b95623a0ffeec8863ef1b8c2",
+      "sha256": "df771f6b90fc3b3d4996d5e8682ab00d4fa6f55beef308ea764b0f7a2a1c38e2"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/clean-data-xls/SKILL.md",
+      "gitBlobSha": "82cab2cd30c74d314f33805f8b0b8782dfe3b5a7",
+      "sha256": "f0dfceb01532a637b0edbbe15dbab9fe2d52279b140cea4ba8ba7823e46ad15b"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/competitive-analysis/SKILL.md",
+      "gitBlobSha": "2632b3d1507424ac2d81578c7e05f81e7d54791d",
+      "sha256": "65c6e2a68ba67660076e1f5b7d3602f71b3e97d3cdc1f2a6b03c12c05c24f1f9"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/competitive-analysis/references/frameworks.md",
+      "gitBlobSha": "66b9f3d138db176c0a0a1a8caa0e7c97bc92eb61",
+      "sha256": "93b3f437c8da7a48e8a77603bd4eb47aba5880e40afdc1d77b8e590bd02c61b7"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/competitive-analysis/references/schemas.md",
+      "gitBlobSha": "8449f144ee4a0f33baf4f78824a79e0ffce3be76",
+      "sha256": "4bc65ebead267d789a0824342d7e59ac7ff133e873f3c32675bf351d472c9e6d"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/comps-analysis/SKILL.md",
+      "gitBlobSha": "8eea74c4f9c91e449657ca51d8e2c7f106f601dd",
+      "sha256": "2d49d9d694297da6ca3b084564ce10ed496f4ff21f275dae6b6c50d7b4dd889a"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/dcf-model/SKILL.md",
+      "gitBlobSha": "cc17fc002b7e739d00e6b62c4c7a3a806b6f3f22",
+      "sha256": "2bb3ed672ab2fa76f8820ee919b158a67dc6df10e7052eeb661599140a9a2494"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/dcf-model/TROUBLESHOOTING.md",
+      "gitBlobSha": "eb46365ca1a4264a73cc5796b216faad4307a323",
+      "sha256": "6e605b455032973465f685535251a7d2d889a2dad9b05ba8d6dfc01f801b28d0"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/dcf-model/requirements.txt",
+      "gitBlobSha": "0040dc4ada7b9ed59c3f588a75828417bce68332",
+      "sha256": "c007f21b5659d4a29dfde17ad586b31ace9e2c5cdb2aeaa39950a7f7c6a75a8f"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/dcf-model/scripts/validate_dcf.py",
+      "gitBlobSha": "6c8172cf8cf86f6518c99a6886336fdbf3bcc12a",
+      "sha256": "6892a153a0b834f0f31d8676602341a4d721bbb2c294dbed64a03262512e738a"
+    },
+    {
+      "path": "plugins/vertical-plugins/financial-analysis/skills/xlsx-author/SKILL.md",
+      "gitBlobSha": "0d757862a9257f69801adaf6f93e2bf70f8a7fe9",
+      "sha256": "85b5b76901a7c53f9725220251ccf0f014dc5f66a3f100e762b64fddb368cfa6"
+    }
+  ]
+}

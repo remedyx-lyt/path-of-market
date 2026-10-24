@@ -170,3 +170,55 @@ button:disabled { opacity: 0.55; cursor: wait; }
 .report-evidence ol { padding-left: 18px; }
 .report-evidence li { margin: 12px 0; }
 .report-evidence li p { margin-top: 2px; }
+
+/* 真实研究采用可阅读的白色报告页，表图与正文共用同一份底稿。 */
+.research-preview--agent { background: #fff; color: #171a16; border: 1px solid #dedfd7; box-shadow: none; --chart-text: #72766c; --chart-grid: #e2e4dc; --chart-line: #232820; }
+.research-preview--agent .report-summary { color: #454b41; font-size: 15px; line-height: 1.9; padding: 16px 0; border-top: 2px solid #20251d; }
+.research-preview--agent .report-prose p { color: #353b31; line-height: 1.95; font-size: 14px; }
+.report-prose p + p { margin-top: 13px; }
+.research-preview--agent .report-task, .research-preview--agent .preview-fields > div, .research-preview--agent .report-section, .research-preview--agent .report-evidence, .research-preview--agent .market-section { border-color: #dedfd7; }
+.research-preview--agent .report-task > summary, .research-preview--agent .preview-fields dt, .research-preview--agent .market-caption, .research-preview--agent .chart-cursor, .research-preview--agent .report-evidence p { color: #6d7366; }
+.research-preview--agent .mock-badge { border-color: #9ab9a4; color: #386047; }
+.research-preview--agent .preview-status--ready { color: #55705b; }
+.research-preview--agent .section-citations a, .research-preview--agent .report-evidence a { color: #4b6a55; }
+.research-preview--agent .research-table th, .research-preview--agent .research-table td { border-color: #e2e5dc; }
+.research-preview--agent .research-table th, .research-preview--agent .research-table caption { color: #69725f; }
+.research-preview--agent .report-limitations { color: #737a6c; border-color: #e0e3d8; }
+.research-preview--agent .chart-switch button { color: #555e4d; border-color: #d0d6c6; }
+.research-preview--agent .chart-switch button[aria-pressed="true"] { color: #fff; background: #252e20; border-color: #252e20; }
+.report-nav { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 22px; font-size: 12px; line-height: 1.7; }
+.report-nav a { color: #607052; text-decoration: underline; text-underline-offset: 4px; }
+.report-section, .financial-section { scroll-margin-top: 24px; }
+.financial-section { padding: 28px 0; border-bottom: 1px solid #dedfd7; }
+.report-section-heading { display: flex; justify-content: space-between; align-items: end; gap: 12px; margin-bottom: 20px; }
+.report-kicker { font: 10px Consolas, monospace; color: #7a8270; letter-spacing: .08em; }
+.report-section-heading h3 { font-size: 22px; margin: 7px 0 0; }
+.report-section-heading > span, .financial-note, .chart-source { font-size: 11px; color: #737c69; line-height: 1.8; }
+.financial-note { margin: 12px 0 18px; }
+.financial-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
+.financial-chart { margin: 0 0 26px; padding-bottom: 18px; border-bottom: 1px solid #e7e9e1; min-width: 0; }
+.financial-chart figcaption { font-size: 14px; font-weight: 650; margin-bottom: 12px; line-height: 1.65; }
+.financial-chart svg { display: block; width: 100%; height: auto; }
+.financial-chart svg text { font-size: 16px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 10px; color: #6a7260; min-height: 24px; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.chart-legend i { width: 8px; height: 8px; display: inline-block; }
+.chart-legend .chart-unit { margin-left: auto; }
+.chart-source { margin: 0; font-size: 10px; overflow-wrap: anywhere; }
+.chart-source a, .financial-table a { color: #4d725b; text-decoration: underline; text-underline-offset: 3px; }
+.financial-table { font-size: 12px; }
+.financial-table thead { border-top: 2px solid #404b36; background: #f5f7f0; }
+.financial-table th:not(:first-child), .financial-table td { text-align: right; white-space: nowrap; }
+.financial-table .yoy-row th, .financial-table .yoy-row td { color: #7a826f; font-size: 11px; padding-top: 2px; }
+.financial-table-details > summary, .financial-gaps > summary, .visual-readings > summary { padding: 13px 0; font-size: 12px; color: #657457; }
+.financial-gaps p, .visual-readings p, .report-skill { color: #747d6a; font-size: 11px; line-height: 1.9; overflow-wrap: anywhere; }
+.visual-readings { margin: 20px 0; border-bottom: 1px solid #e0e5d8; }
+.visual-readings > div { margin: 15px 0; }
+.visual-readings strong { font-size: 12px; }
+@media (min-width: 1100px) {
+  main:has(.workspace-layout--report) { max-width: 1600px; }
+  .workspace-layout--report { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 36px; }
+  .workspace-layout--report h1 { font-size: 44px; }
+}
+@media (max-width: 1099px) { .financial-grid { grid-template-columns: 1fr; } }
+@media (max-width: 500px) { .report-section-heading { align-items: start; flex-direction: column; } .financial-table th, .financial-table td { padding-left: 6px; padding-right: 6px; } .financial-chart svg text { font-size: 20px; } }

@@ -15,6 +15,8 @@ from app.tools.contracts import (CompanyArguments, DocumentArguments, FindArgume
                                  ReadArguments, SearchArguments, BatchReadArguments, ToolError)
 from app.tools.documents import DocumentStore
 from app.tools.market import MarketArguments, MarketProvider
+from app.schemas.financial import InspectArguments
+from app.tools.visuals import render_pages
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,7 @@ TOOLS = (
     ToolDefinition("read_document", "读取已下载 PDF 指定物理页原文与来源；过长时用 nextOffset 继续。", ReadArguments, "read"),
     ToolDefinition("read_document_batch", "连续分批通读选定年报全部页面；从第一页开始，用 nextCursor 接续到 endOfDocument。关键词搜索仅辅助复查。", BatchReadArguments, "read_batch"),
     ToolDefinition("get_market_data", "查询沪深股票日线、不复权价格与后复权序列，程序计算区间变化、回撤、波动及月度表现。", MarketArguments, "market"),
+    ToolDefinition("render_document_pages", "将已获取的PDF物理页渲染为PNG；渲染不等于模型已经理解。", InspectArguments, "render"),
 )
 
 
@@ -104,6 +107,9 @@ class ResearchTools:
     def market(self, args):
         company = self.provider.resolve_company(args.company)
         return self.market_provider.history(company, args.start_date, args.end_date)
+
+    def render(self, args):
+        return render_pages(self.store, args.model_dump(by_alias=True))
 
 
 @lru_cache(maxsize=1)

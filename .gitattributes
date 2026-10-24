@@ -7,3 +7,6 @@
 *.jpg binary
 *.jpeg binary
 *.pdf binary
+
+# 上游副本的哈希与许可证归属依赖原始字节；禁止自动换行转换。
+third_party/anthropic-financial-services/** -text

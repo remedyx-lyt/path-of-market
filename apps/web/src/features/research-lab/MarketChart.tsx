@@ -23,14 +23,14 @@ export function MarketChart({ data }: { data: MarketData }) {
     </div>
     <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={mode === 'raw' ? '不复权日线价格图，单位人民币元' : '后复权收盘归一化走势图，区间起点为100'}>
       {[0, 1, 2, 3, 4].map((i) => { const value = low + spread * i / 4; return <g key={i}>
-        <line x1={left} x2={left + plotWidth} y1={y(value)} y2={y(value)} stroke="#484844" strokeWidth="1" />
-        <text x={left - 8} y={y(value) + 4} textAnchor="end" fill="#aaa" fontSize="11">{value.toFixed(1)}</text>
+        <line x1={left} x2={left + plotWidth} y1={y(value)} y2={y(value)} stroke="var(--chart-grid, #484844)" strokeWidth="1" />
+        <text x={left - 8} y={y(value) + 4} textAnchor="end" fill="var(--chart-text, #aaa)" fontSize="11">{value.toFixed(1)}</text>
       </g> })}
-      <path d={path} fill="none" stroke="#e9e9df" strokeWidth="2" />
+      <path d={path} fill="none" stroke="var(--chart-line, #e9e9df)" strokeWidth="2" />
       <line x1={x(selected)} x2={x(selected)} y1={top} y2={top + plotHeight} stroke="#70d6bd" strokeDasharray="4 4" />
       <circle cx={x(selected)} cy={y(values[selected])} r="4" fill="#70d6bd" />
-      <text x={left} y={height - 10} fill="#aaa" fontSize="11">{rows[0].date}</text>
-      <text x={left + plotWidth} y={height - 10} textAnchor="end" fill="#aaa" fontSize="11">{rows[rows.length - 1].date}</text>
+      <text x={left} y={height - 10} fill="var(--chart-text, #aaa)" fontSize="11">{rows[0].date}</text>
+      <text x={left + plotWidth} y={height - 10} textAnchor="end" fill="var(--chart-text, #aaa)" fontSize="11">{rows[rows.length - 1].date}</text>
     </svg>
     <label className="chart-cursor">查看交易日：{row.date} · 实际价格 {row.close.toFixed(2)} 元 · 复权指数 {(row.adjustedClose / base * 100).toFixed(2)}
       <input aria-label="选择交易日" type="range" min={0} max={rows.length - 1} value={selected} onChange={(e) => setSelected(Number(e.target.value))} />

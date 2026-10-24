@@ -7,6 +7,8 @@ from app.tools.contracts import DocumentArguments
 
 
 class AgentResearchRequest(ModelResearchRequest):
+    include_financials: bool = Field(default=True, alias="includeFinancials", strict=True,
+        description="提取财务底稿并通过原页视觉检查，生成同期间表图；纯专题可关闭。")
     include_market: bool = Field(default=True, alias="includeMarket", strict=True)
     include_current_period: bool = Field(default=True, alias="includeCurrentPeriod", strict=True,
         description="补充研究截止年度最新已披露的季报/半年报；纯历史年度专题可关闭。")
@@ -30,6 +32,7 @@ class AgentSection(BaseModel):
     heading: str = Field(min_length=1, max_length=120, strict=True)
     content: str = Field(min_length=1, max_length=10000, strict=True)
     citations: list[Citation] = Field(default_factory=list, max_length=12)
+    topics: list[Literal['business', 'performance', 'profitability', 'cashflow', 'balance_sheet', 'research', 'risks']] = Field(default_factory=list, max_length=7)
 
 
 class AgentContent(BaseModel):

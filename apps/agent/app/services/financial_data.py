@@ -1,0 +1,103 @@
+"""财务底稿、同比和受控图表；不让 LLM 提供最终计算值或可执行图形代码。"""
+
+from decimal import Decimal, InvalidOperation
+import re
+
+LABELS = {'revenue': '营业收入', 'netProfit': '归母净利润', 'recurringProfit': '扣非归母净利润',
+          'operatingCashFlow': '经营现金流净额', 'totalAssets': '总资产', 'netAssets': '归母净资产', 'rdExpense': '研发费用'}
+PERIODS = {'annual': '年度', 'h1': '上半年', 'q1': '一季度', 'q3': '前三季度'}
+FLOW = {'revenue', 'netProfit', 'recurringProfit', 'operatingCashFlow', 'rdExpense'}
+SCALE = {'元': Decimal(1), '万元': Decimal(10000), '亿元': Decimal(100000000)}
+ROW_LABELS = {'revenue':'营业收入', 'netProfit':'归属于上市公司股东的净利润',
+              'recurringProfit':'归属于上市公司股东的扣除非经常性损益的净利润',
+              'operatingCashFlow':'经营活动产生的现金流量净额', 'totalAssets':'(?:总资产|资产总额)',
+              'netAssets':'归属于上市公司股东的净资产', 'rdExpense':'研发费用'}
+
+
+def locate_summary_pages(pages):
+    for entry in pages[:40]:
+        text = re.sub(r'\s+', '', entry['text'])
+        if '主要会计数据' in text and sum(label in text for label in ['营业收入', '净利润', '现金流']) >= 3:
+            return [entry['page']]
+    return []
+
+
+def verified_points(result, document, pages):
+    """数字需在同一物理页原文出现；列序与期间由视觉核对，仍需保留模型取数局限。"""
+    accepted, gaps = [], []
+    for point in result.financial_points:
+        if point.page not in pages or point.year > document['fiscalYear']:
+            gaps.append('取数页码或年度无效，已排除。'); continue
+        if point.metric in FLOW:
+            expected = {'annual':'annual', 'interim':'h1', 'q1':'q1', 'q3':'q3'}.get(document.get('reportType', 'annual'))
+            if point.period != expected:
+                gaps.append('流量指标期间与原报告不一致，已排除。'); continue
+        try:
+            raw = Decimal(point.raw_value.replace(',', ''))
+            tokens = re.findall(r'-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?', pages[point.page])
+            matched = any(Decimal(t.replace(',', '')) == raw for t in tokens)
+            compact = re.sub(r'\s+', '', pages[point.page])
+            row_unit = re.search(ROW_LABELS[point.metric] + r'[（(](亿元|万元|元)[）)]', compact)
+            global_unit = re.search(r'单位[:：](?:人民币)?(亿元|万元|元)', compact)
+            declared = row_unit or global_unit
+            value = raw * SCALE[point.unit]
+            if not value.is_finite() or abs(value) > Decimal('1e17') or not matched or declared is None or declared[1] != point.unit:
+                raise ValueError
+        except (ValueError, InvalidOperation):
+            gaps.append(f'{point.year}{PERIODS[point.period]}{LABELS[point.metric]}未与本页文字数字匹配，未画图。'); continue
+        accepted.append({'metric':point.metric, 'year':point.year, 'period':point.period, 'value':float(value),
+            'sourceId':document['documentId'], 'page':point.page, 'publishedAt':document['publishedAt'],
+            'rawValue':point.raw_value, 'unit':point.unit, 'verification':'vision_and_text_number_match'})
+    return accepted, gaps
+
+
+def yoy(current, previous):
+    if previous is None:
+        return {'value':None, 'reason':'缺少上年同期间数据'}
+    if previous == 0:
+        return {'value':None, 'reason':'上年同期基数为零'}
+    if previous < 0:
+        return {'value':None, 'reason':'上年同期为负，改看扭亏或亏损绝对变化'}
+    return {'value':round(float((Decimal(str(current)) / Decimal(str(previous)) - 1) * 100), 4), 'reason':''}
+
+
+def build_financial_data(points, gaps=()):
+    groups, issues = {}, list(gaps)
+    for point in points:
+        key = (point['period'], point['year'], point['metric'])
+        groups.setdefault(key, []).append(point)
+    values = {}
+    for key, candidates in groups.items():
+        if len({p['value'] for p in candidates}) > 1:
+            issues.append(f'{key[1]}{PERIODS[key[0]]}{LABELS[key[2]]}存在不同来源数值冲突，未自动选值。')
+            continue
+        values[key] = max(candidates, key=lambda p:p['publishedAt'])
+    datasets, charts = [], []
+    for kind, label in PERIODS.items():
+        years = sorted({y for k,y,_ in values if k == kind})
+        if not years:
+            continue
+        rows = []
+        for year in years[-3:]:
+            cells = {metric:p for (k,y,metric),p in values.items() if k == kind and y == year}
+            amounts = {metric:p['value'] for metric,p in cells.items()}
+            growth = {metric:yoy(p['value'], values.get((kind,year-1,metric),{}).get('value')) for metric,p in cells.items() if metric in FLOW}
+            if amounts.get('revenue', 0) > 0 and 'netProfit' in amounts:
+                amounts['attributableMargin'] = round(amounts['netProfit'] / amounts['revenue'] * 100, 4)
+            rows.append({'year':year, 'periodLabel':f'{year}{label}', 'values':amounts, 'yoy':growth,
+                         'evidence':{metric:{k:p[k] for k in ['sourceId','page','rawValue','unit','verification']} for metric,p in cells.items()}})
+        datasets.append({'id':kind, 'label':label, 'rows':rows})
+        definitions = [('revenue', '营业收入', 'bar', ['revenue'], 'amount'),
+                       ('growth', '营收与归母利润同比', 'line', ['revenue','netProfit'], 'yoy'),
+                       ('cash-profit', '归母利润与经营现金流', 'bar', ['netProfit','operatingCashFlow'], 'amount'),
+                       ('margin', '归母净利率（归母利润÷营收）', 'line', ['attributableMargin'], 'ratio')]
+        for slug, title, chart_type, keys, mode in definitions:
+            active = [key for key in keys if any(key in (r['yoy'] if mode == 'yoy' else r['values']) for r in rows)]
+            if active:
+                charts.append({'id':kind+'-'+slug, 'datasetId':kind, 'title':label+' · '+title, 'type':chart_type,
+                               'keys':active, 'valueKind':mode, 'unit':'亿元' if mode=='amount' else '%'})
+    if not datasets:
+        issues.append('尚无通过原页与数字核对的财务底稿，无法生成财务图表。')
+    return {'schemaVersion':1, 'datasets':datasets, 'charts':charts, 'gaps':list(dict.fromkeys(issues)),
+            'labels':{**LABELS, 'attributableMargin':'归母净利率'},
+            'method':'先视觉核对原页，再匹配本页文字数字；金额统一元，图示亿元；同比仅同期间且正基数，不能把此校验当独立审计。'}

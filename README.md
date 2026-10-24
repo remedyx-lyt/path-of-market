@@ -10,9 +10,9 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 已初始化本地 Git，分支为 `main`。当前没有配置远程地址，代码和提交先保存在本地。
 
-下一项为 M1-4：预兆策略与 Agent 行为验收。模型当前使用三个逻辑工具，底层保留七个可复用工具；详见 [M1-3 使用与代码导读](docs/m1-3-agent.md)。中际旭创案例实际处理三份报告共 649 页可提取文字和约 24 个月的 486 个交易日日线。全文文字处理不等于读懂图像/扫描页。
+按用户要求先补齐了财务研究 Skill、财务表图与局部 PDF 原页视觉；之后继续 M1-4。当前五个模型工具/八个底层工具，16个 Anthropic 原版 Skill/36个文件按许可保留，适配规则实际加载。年度/半年度独立展示收入、同比、利润/现金流和归母净利率图表，见 [研究Skill与表图说明](docs/financial-research-skill.md)。
 
-[查看本机已完成案例](http://127.0.0.1:5173/?task=8fc56014-19be-4acb-9120-8b94556f4e6e) 不会重新调用模型。任务目前只保存在 Python 进程内，重启/淘汰后链接失效；该案例 JSON 已另存 `storage/runs/m1-3-zjxc-web-live.json`，聊天工作区另有 Markdown 备份。会话持久化与侧栏聊天按 M2 推进。
+[查看最新中际旭创图文案例](http://127.0.0.1:5173/?task=9636131a-13ba-4f6e-ae14-7f3660dc3731) 不会重新调用模型。三份报告649页文字与局部8页图片分别记录，保留行情与财务图表。任务只在 Python 进程内，重启/淘汰后链接失效；备份为 `storage/runs/financial-report-live.json` 和聊天工作区 `outputs/`。会话持久化与侧栏聊天仍在 M2。
 
 ## 自动资料工具（M1-2）
 
@@ -113,6 +113,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 - `AGENTS.md`、`docs/agent-design-decisions.md`：核心机制参考成熟实践、JSONL 会话方向、统一资料通读和学习交接。
 - `docs/m1-2-tools.md`：自动查年报、六个工具、连续全本阅读与验收。
 - `docs/m1-3-agent.md`：动态研究循环、三个逻辑工具/七个底层工具、股票行情、真实案例与学习入口。
+- `docs/financial-research-skill.md`：最新五个逻辑工具/八个底层工具、原版金融Skill、原页视觉、财务底稿/同比和图表。
 - `docs/current-state.md`：当前进度。
 - `docs/task-board.md`：任务板。
 - `docs/dev-workflow.md`：AI 协作开发工作流。

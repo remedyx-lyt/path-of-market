@@ -31,10 +31,12 @@ if __name__ == "__main__":
     parser.add_argument("--base-url", default="http://127.0.0.1:5173")
     parser.add_argument("--as-of", default=date.today().isoformat())
     parser.add_argument("--resume")
+    parser.add_argument("--output", type=Path, default=ROOT / "storage/runs/m1-3-zjxc-web-live.json")
+    parser.add_argument("--require-financials", action="store_true")
     args = parser.parse_args()
     if not args.live:
         parser.error("实际模型检查需显式 --live。")
-    target = ROOT / "storage/runs/m1-3-zjxc-web-live.json"
+    target = args.output if args.output.is_absolute() else ROOT / args.output
     target.parent.mkdir(parents=True, exist_ok=True)
     if args.resume:
         task_id = args.resume
@@ -65,6 +67,9 @@ if __name__ == "__main__":
             if job["status"] == "completed":
                 assert report["mode"] == "agent" and report["marketData"]["series"]
                 assert report["sources"] and report["toolCalls"] and all(c["textComplete"] for c in report["coverage"])
+                if args.require_financials:
+                    assert report.get('financialData',{}).get('datasets') and report.get('visualReadings') and report.get('researchSkill')
+                    assert any(d['id']=='annual' for d in report['financialData']['datasets'])
                 print("PASS live web → Java → Python → model/tools → report", flush=True)
                 raise SystemExit(0)
             raise SystemExit(1)

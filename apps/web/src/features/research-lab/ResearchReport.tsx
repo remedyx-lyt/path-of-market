@@ -2,6 +2,8 @@ import type { ResearchReport as Report } from '../../api/research'
 import { OMENS } from './researchDraft'
 import type { AgentResearchReport } from '../../api/research'
 import { MarketChart } from './MarketChart'
+import { FinancialCharts } from './FinancialCharts'
+import { ReportText } from './ReportText'
 
 export function ResearchReport({ report }: { report: Report }) {
   if (report.mode === 'agent') return <AgentReportView report={report} />
@@ -43,11 +45,15 @@ export function ResearchReport({ report }: { report: Report }) {
 }
 
 function AgentReportView({ report }: { report: AgentResearchReport }) {
-  const labels: Record<string, string> = { find_documents: '查找报告', read_document: '阅读与回查', get_market_data: '查询行情' }
+  const labels: Record<string, string> = { find_documents: '查找报告', read_document: '阅读与回查', get_market_data: '查询行情', inspect_document_pages:'检查PDF原页', read_research_skill:'读取研究方法' }
   return <>
     <span className="mock-badge">真实研究 · {report.run.status === 'completed' ? '已完成' : '部分结果'}</span>
     <h2 className="report-title">{report.title}</h2>
-    <p className="report-summary">{report.summary}</p>
+    <div className="report-summary"><ReportText text={report.summary} /></div>
+    <nav className="report-nav" aria-label="报告目录">
+      {report.financialData?.datasets.length ? <a href="#financial-analysis">财务表图</a> : null}
+      {report.sections.map((s,i) => <a key={i} href={`#analysis-${i}`}>{s.heading.replace(/^[一二三四五六七八九十]+[、.．]\s*/, '')}</a>)}
+    </nav>
     <details className="report-task">
       <summary>研究任务与执行记录</summary>
       <dl className="preview-fields">
@@ -62,10 +68,11 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
         <div><dt>任务编号</dt><dd>{report.run.taskId}</dd></div>
       </dl>
     </details>
+    {report.financialData && <FinancialCharts data={report.financialData} sources={report.sources} />}
     {report.marketData && <MarketChart data={report.marketData} />}
     <div className="report-sections">
-      {report.sections.map((section, i) => <section className="report-section" key={`${i}-${section.heading}`}>
-        <h3>{section.heading}</h3><p>{section.content}</p>
+      {report.sections.map((section, i) => <section className="report-section" id={`analysis-${i}`} key={`${i}-${section.heading}`}>
+        <h3>{section.heading}</h3><ReportText text={section.content} />
         <div className="section-citations">{section.citations.map((citation, j) => {
           const source = report.sources.find((s) => s.sourceId === citation.sourceId)
           return source ? <a key={`${citation.sourceId}-${j}`} href={`${source.url}${citation.page ? `#page=${citation.page}` : ''}`} target="_blank" rel="noreferrer">
@@ -74,6 +81,11 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
         })}</div>
       </section>)}
     </div>
+    {!!report.visualReadings?.length && <details className="visual-readings"><summary>PDF 原页视觉检查 · {new Set(report.visualReadings.flatMap((r) => r.pages.map((p) => `${r.sourceId}:${p}`))).size} 页</summary>
+      {report.visualReadings.map((reading,i) => <div key={i}><strong>{report.sources.find((s) => s.sourceId===reading.sourceId)?.title}</strong><p>{reading.origin === 'automatic_financial_summary' ? '财务摘要自动检查' : '模型主动回查'}{reading.cacheReused ? ' · 复用已有视觉记录' : ''}</p>{reading.observations.map((o) => <p key={o.page}>PDF第{o.page}页：{o.summary}{o.uncertainties.length ? `；待核查：${o.uncertainties.join('；')}` : ''}</p>)}</div>)}
+      <p>只检查以上页面，不能视为全本图片均已理解。</p>
+    </details>}
+    {report.researchSkill && <p className="report-skill">研究规范：{report.researchSkill.name} · {report.researchSkill.version} · 参考 {report.researchSkill.upstream}</p>}
     <section className="report-evidence" aria-label="研究来源">
       <h3>本次资料来源</h3>
       <ol>{report.sources.map((source) => <li key={source.sourceId}><a href={source.url} target="_blank" rel="noreferrer">{source.title} ↗</a><p>{source.kind === 'document' ? '披露日期' : '数据截至'}：{source.publishedAt}</p></li>)}</ol>
