@@ -16,6 +16,7 @@ const NOTES = new Set(['current_period_lookup', 'skill_read', 'data_extracted', 
   'review_discarded', 'report_drafting_fallback', 'methods_plan_failed', 'run_partial', 'run_failed', 'run_cancelled'])
 for (const type of ['methods_plan_invalid', 'reading_note_invalid', 'reading_batch_split', 'reading_batch_retry', 'reading_batch_failed']) NOTES.add(type)
 for (const type of ['run_resumed', 'budget_wrapup', 'checkpoint_failed', 'writing_unit_retry', 'writing_unit_failed']) NOTES.add(type)
+for (const type of ['compaction_started', 'compaction_completed', 'compaction_failed', 'compaction_skipped']) NOTES.add(type)
 
 type Item =
   | { kind: 'phase'; id: string; text: string }
@@ -84,6 +85,7 @@ export function ActivityPanel({ job, live }: { job: ResearchJob; live: boolean }
   const current = PHASES.findIndex((p) => p.id === job.phase)
   const plan = job.events.find((e) => e.type === 'methods_planned')
   const hit = job.usage.prompt_cache_hit_tokens, miss = job.usage.prompt_cache_miss_tokens
+  const compactions = job.events.filter((e) => e.type === 'compaction_completed')
   const elapsed = (Date.parse(job.events.at(-1)?.timestamp ?? '') - Date.parse(job.events[0]?.timestamp ?? '')) / 1000
   useEffect(() => {
     if (live && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
@@ -94,7 +96,12 @@ export function ActivityPanel({ job, live }: { job: ResearchJob; live: boolean }
       模型调用 {job.modelCalls} 次 · {(job.usage.total_tokens ?? 0).toLocaleString()} tokens
       {typeof hit === 'number' && typeof miss === 'number' && hit + miss > 0 ? ` · 缓存命中 ${Math.round(hit / (hit + miss) * 100)}%` : ''}
       {Number.isFinite(elapsed) && elapsed > 0 ? ` · 用时 ${Math.floor(elapsed / 60)}分${Math.round(elapsed % 60)}秒` : ''}
+      {compactions.length ? ` · 上下文已整理 ${compactions.length} 次` : ''}
     </p>
+    {compactions.map((event, index) => <details key={event.id} className="activity-plan"><summary>查看第 {index + 1} 次上下文摘要</summary>
+      <p>上下文字符数：{event.beforeCharacters?.toLocaleString()} → {event.afterCharacters?.toLocaleString()}。这是模型摘要，原始研究资料仍保留。</p>
+      <p style={{ whiteSpace: 'pre-wrap' }}>{event.summaryText}</p>
+    </details>)}
     {plan?.checks?.length ? <details className="activity-plan"><summary>研究计划 · {plan.checks.length} 项检查</summary>
       {plan.focus ? <p>{plan.focus}</p> : null}
       <ol>{plan.checks.map((c, i) => <li key={i}>{c.question}</li>)}</ol>

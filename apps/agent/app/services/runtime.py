@@ -17,9 +17,14 @@ class RunLimits:
     max_seconds: float = 1200
     # 程序自设的单次请求文字上限（不是模型窗口；deepseek-flash 窗口 100 万 token）。2026-10-24 用户要求由 16 万翻倍。
     max_context_characters: int = 320000
-    # 决策上下文超过 max_context_characters - context_reserve_characters 时停止取证、转入写作（参照 Pi 的 reserveTokens）；
-    # 预留量要容纳写作规则与一次工具结果，避免写作请求本身越过上限。
+    # 接近上限先摘要较早历史；仍不能腾出空间时，研究阶段停止取证、转入写作。
+    # 预留量要容纳写作规则与一次工具结果；字符预算不是模型的精确token窗口。
     context_reserve_characters: int = 32000
+    compaction_keep_characters: int = 48000
+    compaction_chunk_characters: int = 64000
+    max_compaction_chunks: int = 8
+    max_compactions_per_run: int = 4
+    compaction_tokens: int = 3500
     report_tokens: int = 14000
     read_characters: int = 26000
     max_visual_pages: int = 12

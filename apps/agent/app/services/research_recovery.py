@@ -19,6 +19,7 @@ STATE_FIELDS = (
     "market_data", "visual_readings", "extraction_readings", "financial_points", "financial_gaps", "segment_points",
     "business_gaps", "method_usage", "action_counts", "report_candidate", "table_gaps", "wrapup_gaps", "restored_financial",
     "writing_state", "writer_tools_rejected", "report_stage",
+    "compaction_state", "compaction_count",
 )
 SET_FIELDS = ("financial_checked", "detail_checked")
 
@@ -39,10 +40,11 @@ def save_checkpoint(runner):
         "status": runner.job.status, "model": runner.settings.model, "baseUrl": runner.settings.base_url,
         "request": runner.job.request.model_dump(mode="json", by_alias=True), "state": state,
         "messages": list(runner.messages), "modelCalls": runner.job.model_calls, "usage": runner.job.usage,
+        "messageEntryIds": list(getattr(runner.messages, "entry_ids", [])),
     })
 
 
-def current_messages(entries):
+def current_message_entries(entries):
     """只走最后节点的父链；不把其他分支/作废草稿混进模型上下文。"""
     nodes = {e["id"]: e for e in entries if e.get("type") != "session" and e.get("id")}
     chain, seen = [], set()
@@ -56,7 +58,11 @@ def current_messages(entries):
         leaf = entry.get("parentId")
     chain.reverse()
     removed = {e.get("targetId") for e in chain if e.get("type") == "context_edit"}
-    return [e["message"] for e in chain if e.get("type") == "message" and e["id"] not in removed]
+    return [e for e in chain if e.get("type") == "message" and e["id"] not in removed]
+
+
+def current_messages(entries):
+    return [entry["message"] for entry in current_message_entries(entries)]
 
 
 def legacy_recovery(entries, task_id, *, allow_completed=False):
@@ -83,6 +89,10 @@ def legacy_recovery(entries, task_id, *, allow_completed=False):
         "restored_financial": report.get("financialData"),
         "business_gaps": (report.get("businessData") or {}).get("gaps", []),
     }
+    compaction = next((e for e in reversed(entries) if e.get("type") == "compaction"), None)
+    if compaction:
+        state["compaction_state"] = compaction.get("state")
+        state["compaction_count"] = sum(e.get("type") == "compaction" and not e.get("restored") for e in entries)
     draft = next((e.get("writingState") for e in reversed(entries) if e.get("type") == "report_draft"), None)
     if draft:
         state["writing_state"] = draft
@@ -125,6 +135,7 @@ def legacy_recovery(entries, task_id, *, allow_completed=False):
         "request": header["request"], "state": state, "messages": messages,
         "model": report.get("run", {}).get("model"), "modelCalls": latest.get("modelCalls", 0),
         "usage": latest.get("usage", {}), "legacy": True,
+        "messageEntryIds": [e["id"] for e in current_message_entries(entries)],
     }
 
 

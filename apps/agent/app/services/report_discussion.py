@@ -10,12 +10,11 @@ import os
 from uuid import UUID
 from urllib.request import urlopen
 
-from app.core.agent_prompts import initial_messages
 from app.core.config import ModelServiceError
 from app.schemas.agent import AgentResearchRequest
 from app.schemas.discussion import FollowupAnswer
 from app.services.agent_runner import AgentRunner
-from app.services.research_recovery import load_recovery, pending_calls, recovery_error
+from app.services.research_recovery import checkpoint_path, legacy_recovery, load_recovery, pending_calls, recovery_error
 from app.services.runtime import BudgetStop, RunLimits, now
 from app.services.session_recorder import DEFAULT_URL, RecordedMessages, SessionRecorder
 
@@ -59,21 +58,20 @@ def prepare_followup(tools, task_id, request):
         raise recovery_error("请先完成或接续研究，再围绕完整报告对话。")
     version = reports[-1]
     try:
-        recovery = load_recovery(tools, leaf["runId"], allow_completed=True)
+        if checkpoint_path(tools, leaf["runId"]).exists():
+            recovery = load_recovery(tools, leaf["runId"], allow_completed=True)
+        else:
+            # JSONL降级也只用所选父链，绝不能读同文件另一个分支的最后一份报告/摘要。
+            recovery = legacy_recovery([entries[0], *chain], entries[0]["runId"], allow_completed=True)
+            recovery["taskId"] = leaf["runId"]
     except ModelServiceError:
         if leaf["type"] != "followup":
             raise
         # 请求刚落盘便退出时没有新证据检查点，退到这次请求所基于的完整报告。
         recovery = load_recovery(tools, version["runId"], allow_completed=True)
     request_data = entries[0]["request"]
-    # 不将已失败分支、其他版本分支或研究期的巨大草稿塞入对话。
-    turns = [e for e in chain if e["type"] == "chat_turn" and e.get("status") == "completed"]
-    history = [m for e in turns for m in (
-        {"role": "user", "content": e["userMessage"]},
-        {"role": "assistant", "content": e["answer"]},
-    )]
     return {"entries": entries, "recovery": recovery, "request": AgentResearchRequest.model_validate(request_data),
-            "base": version, "history": history, "sessionId": entries[0]["id"],
+            "base": version, "sessionId": entries[0]["id"],
             "rootTaskId": entries[0]["runId"], "nextVersion": max(e.get("reportVersion", 0) for e in entries) + 1}
 
 
@@ -95,16 +93,10 @@ class DiscussionRunner(AgentRunner):
         for event in job.events:  # 证据恢复发生在记录器附着前，也应进入持久化回放。
             job.recorder.add("event", data=event)
         job.recorder.start()
-        self.messages = RecordedMessages([], job.recorder)
-        list.extend(self.messages, initial_messages(job.request))
-        self.messages.entry_ids.extend([None] * len(self.messages))
-        # 全部通读笔记作为上下文，不把只看搜索摘要冒充阅读；工具原文仍可回查。
-        evidence = {"report": self.base, "readingNotes": self.notes, "discovered": self.discovered,
-                    "instruction": "下面开始围绕这份报告的侧栏对话，不要重新生成整份研究。沿用研究截止日和已读证据。"}
-        self.messages.append({"role": "user", "content": json.dumps(evidence, ensure_ascii=False)})
-        for message in prepared["history"]:
-            list.append(self.messages, message)
-            self.messages.entry_ids.append(None)
+        # 复用父节点的原始消息和压缩边界；不把历史答复从JSON改写成另一种文本，否则摘要边界会失效。
+        self.messages = RecordedMessages(prepared["recovery"]["messages"], job.recorder, record_initial=False,
+                                         entry_ids=prepared["recovery"].get("messageEntryIds"))
+        self.record_compaction(restored=True)
         self.messages.append({"role": "user", "content": followup_request.message})
 
     def reply_context(self, *, final=False):
@@ -119,7 +111,11 @@ class DiscussionRunner(AgentRunner):
         )
         if final:
             instruction += "取证轮数已用完，仅用现有证据回答，列明未完成补查；此次禁止调用工具。"
-        return list(self.messages) + [{"role": "user", "content": instruction}]
+        # 当前报告与本次问题放在历史之外，压缩不改变章节序号、正式正文或最新用户要求。
+        active = {"type": "active_report", "report": self.base,
+                  "instruction": "当前讨论的是这份报告；沿用其截止日。原始笔记可按来源目录回查。"}
+        return self.context(include_instruction=False) + [{"role": "user", "content": json.dumps(active, ensure_ascii=False)},
+                    {"role": "user", "content": instruction + "\n本次用户问题：" + self.followup_request.message}]
 
     def validate_answer(self, assistant):
         answer = FollowupAnswer.model_validate_json(assistant.get("content") or "")

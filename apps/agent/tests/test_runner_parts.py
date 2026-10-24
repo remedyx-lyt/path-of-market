@@ -133,7 +133,9 @@ class RunnerParts(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         sizes = [context_characters(c[2]) for c in probe.calls if c[0] == "decision"]
         threshold = (sizes[1] + sizes[2]) // 2  # 第三轮决策前越过
         model = FakeModel(script=script)
-        job, runner = self.runner(model, limits={"max_context_characters": threshold + 50000, "context_reserve_characters": 50000})
+        # M2-5会先尝试摘要；这里单独验收摘要不可用时仍能收尾。
+        job, runner = self.runner(model, limits={"max_context_characters": threshold + 50000, "context_reserve_characters": 50000,
+                                               "max_compactions_per_run": 0})
         await runner.run()
         self.assertEqual(job.status, "completed", job.error)
         self.assertEqual(model.count("decision"), 2)  # 第三轮不再让模型选工具
@@ -353,7 +355,8 @@ class RunnerParts(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         threshold = (sizes[1] + sizes[2]) // 2
         final = report([section("经营证据", "原文记录需结合单位与年度解释。"), section("未取得行情", "取证提前结束，本次没有行情数据。", page=2)])
         model = FakeModel(script=script, final=final)
-        job, runner = self.runner(model, limits={"max_context_characters": threshold + 50000, "context_reserve_characters": 50000})
+        job, runner = self.runner(model, limits={"max_context_characters": threshold + 50000, "context_reserve_characters": 50000,
+                                               "max_compactions_per_run": 0})
         await runner.run()
         self.assertEqual(job.status, "completed", job.error)
         self.assertEqual(model.count("compose"), 1)  # 缺行情不再反复退回重写

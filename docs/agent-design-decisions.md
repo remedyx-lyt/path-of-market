@@ -1,6 +1,6 @@
 # Agent 核心设计依据与决策
 
-更新：2026-10-24。用户明确要求核心组成部分参考成熟 Agent 和官方实践。本文件区分参考事实、产品选择和实际实现；不是将某一项目的所有细节称为统一行业标准。
+更新：2026-10-25。用户明确要求核心组成部分参考成熟 Agent 和官方实践。本文件区分参考事实、产品选择和实际实现；不是将某一项目的所有细节称为统一行业标准。
 
 ## 参考依据
 
@@ -70,7 +70,7 @@ M1-3 Runner 已区分发现、下载/解析、原文返回与 `processedPages` /
 | M1-2 | 独立工具声明、参数校验与执行记录 | 已实现；工具返回值不是完整会话存储 |
 | M1-3 | 运行内消息/事件结构、原始工具调用 ID、上下文与动态循环 | 已实现进程内父关系事件/工具协议；完整消息/结果逐条落盘、确认协议仍在 M2-1 |
 | M2-1 | Java SessionStore 逐条 JSONL 落盘、研究记录、重载与尾行恢复 | 已实现（2026-10-24）：会话头 + `event`/`message`/`context_edit`/`report`/`run_state` 条目，`parentId` 单链；去重、残行、重启索引与快照还原；分支与从会话恢复上下文待 M2-4，见 `m2-1-sessions.md` |
-| M2-5 | 当前分支选择/重建、摘要事件、检查点与任务恢复 | 待做，事件结构从 M1-3 预留父节点关系 |
+| M2-5 | 当前分支选择/重建、摘要事件、检查点与任务恢复 | 2026-10-25已接入结构化历史摘要、近期完整工具组、原记录回查、摘要UI和恢复；真实模型语义质量待验收，见`m2-5-context-compaction.md` |
 
 ## 编码工具如何对应财经工作台
 
@@ -153,5 +153,17 @@ JSONL 已实现主循环消息/事件/报告保存与重启查看；仍没有重
 ## 2026-10-24：M2-4报告对话和版本
 
 再次核对上述Pi会话格式的`parentId`/当前叶节点与agent-loop的`transformContext`、`convertToLlm`，以及[DeepSeek原生工具协议](https://api-docs.deepseek.com/guides/tool_calls/)。采用同会话追加请求、消息、工具结果与报告版本；从用户选中的节点回溯，其他分支不进入对话。运行记录与每次模型输入分开：输入为选定报告、实际通读笔记和该父链的问答，原始工具消息另存。当前尚无compaction，不能把投影说成长期记忆或摘要压缩。
+
+## 2026-10-25：M2-5按需压缩，优先报告后的多轮追问
+
+用户明确报告本身是持久产物，主要需要后续多轮对话压缩。按需触发，短聊天不增加摘要调用；长研究复用保护入口，完整原文阅读子调用不摘要替换。报告、最新问题、来源覆盖/方法计划和准确底稿独立注入，不让摘要模型改写正式数据。
+
+重新核对[Pi compaction说明](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/compaction.md)与[源码](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/compaction/compaction.ts)：接近窗口减预留量时触发，保留近期消息、完整工具请求/结果组，合并此前摘要与新历史并追加摘要边界。核对[Claude Code官方架构](https://code.claude.com/docs/en/how-claude-code-works)：先清理较早工具输出再摘要，并避免大工具输出造成连续压缩。采用既有ToolView精简→结构化旧历史摘要→近期消息的分层，设置有限重试/分块/每轮次数，原消息只追加不删除。
+
+同时通过OpenAI官方文档搜索/读取核对[Codex compaction指南](https://developers.openai.com/cookbook/examples/gpt-5/codex_prompting_guide#compaction)：Responses `/compact`生成用于后续请求的`encrypted_content`。本项目仍是DeepSeek，不把这套原生端点或不透明状态硬接到兼容Chat协议；参考继续执行的机制，使用普通JSON研究摘要，没有添加OpenAI依赖/密钥，也不声称与原生压缩等价。
+
+业务适配：`ContextSummary`保留目标、约束、已完成、决定、未解决项和实际已读引用；新增`recall_research_context`按本分支来源/批次或章节取回保存的原记录。摘要引用与缩减量校验后才采用；不能只验证JSON格式就称事实正确。精确财务值仍从原页与底稿查，摘要不能提高阅读覆盖或抹去冲突。当前32万上限与预留量沿用程序字符预算，不冒称模型精确token窗口。
+
+`compaction`节点追加摘要及firstKeptEntryId、原消息范围哈希；检查点保存原消息ID映射，跨轮沿当前父链复用。不重序列化聊天导致边界错位；无检查点降级也只读所选父链。27项隔离服务集成验证压缩→继续答复/调用工具→JSONL降级→重启恢复，原报告和阅读覆盖不变；11项新增单测与前端摘要检查通过，真实模型调用0次。真实摘要的语义保留质量仍待使用验收；详情及代码入口见[M2-5交接](m2-5-context-compaction.md)。下一项M2-2，未实施。
 
 版本用程序合并经过引用校验的章节补丁，不让模型重写覆盖旧报告；修订继承原图表/数据表，明确未重新整体审计。请求先落盘、以requestId去重，有限重试与失败检查点沿用现有预算和恢复机制。本轮不新增逻辑工具，复用六个工具；21项隔离集成通过，未新增真实模型账户调用。学习入口、采用边界和验收详见[m2-4-report-discussion.md](m2-4-report-discussion.md)。

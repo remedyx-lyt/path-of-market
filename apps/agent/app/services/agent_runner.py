@@ -25,6 +25,7 @@ from app.core.research_skills import SkillArguments, load_research_skill, read_r
 from app.schemas.agent import AgentReadArguments
 from app.schemas.financial import ExtractArguments, InspectArguments
 from app.services.model_client import complete_turn
+from app.services.context_compaction import CompactionMixin, ContextMessages, RecallArguments
 from app.services.runner_evidence import EvidenceMixin
 from app.services.runner_methods import MethodMixin
 from app.services.runner_omens import OmenMixin
@@ -43,6 +44,7 @@ __all__ = ["AgentRunner", "BudgetStop", "RunLimits", "declarations", "now"]
 logger = logging.getLogger("path_of_market.agent")
 
 TOOL_SPECS = (
+    ("recall_research_context", "回查本分支已保存的完整阅读笔记或报告正文。上下文整理后找回细节，不重新付费通读PDF。reading_notes用sourceId/batch，report_section用sectionIndex。", RecallArguments),
     ("find_documents", "从公司/会计年度/截止日找官方完整报告，支持年报、半年报、一季报和三季报；不需要上传。", FindArguments),
     (
         "read_document",
@@ -69,6 +71,7 @@ TOOL_SPECS = (
 
 
 TOOL_LABELS = {
+    "recall_research_context": "回查研究记录",
     "find_documents": "查找报告",
     "read_document": "阅读资料",
     "get_market_data": "查询行情",
@@ -163,13 +166,18 @@ class ToolView:
         return cls(content, projected, excerpt, bool(pages))
 
 
-class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMixin, ReportMixin):
+class AgentRunner(CompactionMixin, ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMixin, ReportMixin):
     def __init__(self, job, tools, settings, *, limits=None, completion=None, recovery=None):
         self.job, self.tools, self.settings = job, tools, settings
         self.limits = limits or RunLimits()
         self.completion = completion or complete_turn
         self.began = time.monotonic()
         self.recovery = recovery
+        self.context_prefix_length = len(initial_messages(job.request))
+        self.compaction_state = None
+        self.compaction_count = 0
+        self.compaction_attempts = 0
+        self.compaction_failed_at = None
         self.messages = recovery["messages"] if recovery else initial_messages(job.request)
         if job.recorder:  # 会话持久化：每条消息（含完整工具结果）同时记入 JSONL
             self.messages = RecordedMessages(self.messages, job.recorder)
@@ -206,6 +214,7 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMi
         self.writer_tools_rejected = False
         if recovery:
             restore_runner(self, recovery)
+            self.record_compaction(restored=True)
 
     def checkpoint(self):
         try:
@@ -258,14 +267,16 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMi
             return "决定下一步"
         return PHASE_PURPOSE.get(self.job.phase, "提取数据")
 
-    async def model(self, messages, *, tool_specs=None, reading=False, visual=False, report=False, write_only=False, on_text=None, output_limit=None):
+    async def model(self, messages, *, tool_specs=None, reading=False, visual=False, report=False, write_only=False, on_text=None, output_limit=None, compacting=False):
         """write_only=True：发送同一组工具定义但禁止调用（tool_choice=none）并要求 JSON，让写作请求与研究轮次共享缓存前缀。
         on_text：流式输出时逐段收到模型文字（写作阶段据此显示“正在写：××”）。"""
+        if not compacting:
+            messages = await self.prepare_context(messages, report=report)
         self.check_budget(model_call=True, report=report)
         if context_characters(messages) > self.limits.max_context_characters:
             raise BudgetStop("context_budget")
         self.job.model_calls += 1
-        purpose = self.model_purpose(tool_specs=tool_specs, reading=reading, visual=visual, write_only=write_only)
+        purpose = "整理上下文摘要" if compacting else self.model_purpose(tool_specs=tool_specs, reading=reading, visual=visual, write_only=write_only)
         started = time.monotonic()
         # 多预兆报告允许更长：每个预兆追加输出预算，不为篇幅牺牲预兆分析。
         report_tokens = self.limits.report_tokens + 2500 * len(self.job.request.omens)
@@ -315,6 +326,7 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMi
 
     async def dispatch(self, name, arguments):
         handlers = {
+            "recall_research_context": self.recall_research_context,
             "find_documents": self.find_documents,
             "read_document": self.read,
             "get_market_data": self.market,
@@ -399,21 +411,19 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMi
             view = self.tool_views[message["tool_call_id"]] = ToolView.build(message["content"])
         return view
 
-    def context(self):
+    def context(self, *, include_instruction=True):
         """主循环每轮请求的消息。self.messages 保留完整工具结果；这里只做有来源的有限投影。
 
         为了前缀缓存：历史消息的投影只取决于消息本身（与轮次无关），当前底稿和剩余轮数放在最后。
         """
-        views = [self.tool_view(m) if m.get("role") == "tool" else None for m in self.messages]
-        # 最近两次按页回查保留原文；更早结果保留来源和有限摘录，完整内容仍可回查。
-        recent_pages = set([i for i, v in enumerate(views) if v and v.has_pages][-2:])
-        messages = []
-        for i, (message, view) in enumerate(zip(self.messages, views)):
-            if view is None:
-                messages.append(dict(message))
-            else:
-                content = view.projected if not view.has_pages or i in recent_pages else view.excerpt
-                messages.append({**message, "content": content})
+        messages = ContextMessages(self.projected_history())
+        # 机器保存的来源/覆盖/计划不交给摘要模型改写；每次请求都带准确索引。
+        source_index = [{"sourceId": sid, "title": s["title"], "kind": s["kind"], "pageCount": s.get("pageCount"),
+                         "textComplete": self.coverage.get(sid, {}).get("textComplete"), "noteBatches": len(self.notes.get(sid, []))}
+                        for sid, s in self.sources.items()]
+        messages += [{"role": "user", "content": json.dumps({"type": "research_context_index", "sources": source_index,
+                     "methodPlan": (self.method_usage or {}).get("plan"),
+                     "instruction": "完整阅读记录和精确底稿仍在程序中。需要历史细节用recall_research_context；摘要不是新证据。"}, ensure_ascii=False)}]
         if self.financial_points or self.financial_gaps or self.segment_points:
             state = {
                 "type": "current_research_state",
@@ -430,8 +440,10 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMi
             if operating:
                 state["operatingDataPages"] = [{"sourceId": sid, "pages": pages} for sid, pages in operating.items()]
                 state["operatingInstruction"] = "这些页有产能/产量/销量/库存数据，报告必须用 tables 列出；写作前可用 mode=page 回查原数。"
-            messages.append({"role": "user", "content": json.dumps(state, ensure_ascii=False)})
-        messages.append(
+            messages += [{"role": "user", "content": json.dumps(state, ensure_ascii=False)}]
+        if not include_instruction:
+            return messages
+        messages += [
             {
                 "role": "user",
                 "content": json.dumps(
@@ -442,13 +454,13 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMi
                     ensure_ascii=False,
                 ),
             }
-        )
+        ]
         return messages
 
     # ---- 主循环 ---------------------------------------------------------
 
     def start_context_wrapup(self):
-        """决策上下文接近上限：停止取证、转入写作，而不是等越过上限后只留部分结果。完整历史压缩按 M2-5 实施。"""
+        """摘要仍不足以腾出空间时停止取证、转入写作；原记录和证据保持不变。"""
         self.context_wrapup = True
         self.job.emit("context_wrapup", "上下文接近上限：停止取证，用已取得的证据撰写报告")
         self.messages.append(
@@ -570,6 +582,8 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMi
             return ""
         pages = lambda value: "、".join(map(str, value)) if isinstance(value, list) else str(value)
         doc = self.document_title(a.get("documentId", ""))
+        if name == "recall_research_context":
+            return f"阅读记录 {self.document_title(a.get('sourceId', ''))} 第{a.get('batch', 0) + 1}批" if a.get("kind") == "reading_notes" else f"已保存报告第{a.get('sectionIndex', 0) + 1}节"
         if name == "find_documents":
             return f"{a.get('company', '')} {pages(a.get('years', []))}年 {pages(a.get('reportTypes', ['年报']))}".strip()
         if name == "read_document":
@@ -591,6 +605,8 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMi
         if result["status"] != "completed":
             return result["error"]["message"]
         data = result["data"]
+        if name == "recall_research_context":
+            return "返回已保存的完整阅读笔记" if "recalledNotes" in data else "返回已保存的章节正文"
         if name == "find_documents":
             return f"找到 {len(data.get('documents', []))} 份报告"
         if name == "read_document":
@@ -634,7 +650,7 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMi
                 for step in range(1, self.limits.max_steps + 1):
                     self.steps = step
                     self.check_budget()
-                    messages = self.context()
+                    messages = await self.prepare_context(self.context())
                     if not self.context_wrapup and context_characters(messages) > (
                         self.limits.max_context_characters - self.limits.context_reserve_characters
                     ):

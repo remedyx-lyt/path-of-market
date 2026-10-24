@@ -90,6 +90,7 @@ export type JobEvent = {
   phase?: string; toolCallId?: string; name?: string; label?: string; summary?: string; result?: string; status?: string
   durationMs?: number; modelCall?: number; purpose?: string; usage?: Record<string, number>; title?: string
   focus?: string; checks?: { question: string; topic: string; omen?: string | null }[]
+  summaryText?: string; beforeCharacters?: number; afterCharacters?: number; compactionCount?: number
 }
 export type ResearchJob = {
   taskId: string; status: 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'; target: string

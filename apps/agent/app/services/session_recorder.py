@@ -124,11 +124,15 @@ class SessionRecorder:
 class RecordedMessages(list):
     """runner.messages 的记录版：每次 append 记一条 message；pop 记一条 context_edit（原消息不删，标为作废）。"""
 
-    def __init__(self, messages, recorder):
+    def __init__(self, messages, recorder, *, record_initial=True, entry_ids=None):
         super().__init__()
         self.recorder, self.entry_ids = recorder, []
-        for message in messages:
-            self.append(message)
+        if record_initial:
+            for message in messages:
+                self.append(message)
+        else:
+            super().extend(messages)
+            self.entry_ids = list(entry_ids) if entry_ids and len(entry_ids) == len(messages) else [None] * len(messages)
 
     def append(self, message):
         super().append(message)

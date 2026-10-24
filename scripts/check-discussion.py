@@ -6,6 +6,7 @@ import asyncio
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import shutil
@@ -29,17 +30,45 @@ def worker(port):
     from app.services.research_jobs import ResearchJob, job_store
     from app.services.session_recorder import SessionRecorder
     from app.services.report_discussion import load_entries
+    from app.services.report_discussion import DiscussionRunner
+    from app.services.context_compaction import COMPACTION_SYSTEM
+    from app.services.runtime import RunLimits
     from app.core.config import ModelServiceError
     import uvicorn
 
     tools = make_tools(FOLDER / "evidence")
-    state = {"calls": 0, "transient": 0}
+    state = {"calls": 0, "transient": 0, "summaries": 0}
+
+    class QaDiscussion(DiscussionRunner):
+        def __init__(self, *args, **kwargs):
+            # 只降低隔离测试的字符触发线，避免为测试制造32万字符/真实费用。
+            kwargs["limits"] = RunLimits(max_steps=8, max_context_characters=70000,
+                context_reserve_characters=8000, compaction_keep_characters=12000,
+                compaction_chunk_characters=24000)
+            super().__init__(*args, **kwargs)
 
     async def completion(settings, messages, **kwargs):
         state["calls"] += 1
         assert settings.api_key == "isolated-test-key-only"
-        queries = [m.get("content", "") for m in messages if m["role"] == "user" and isinstance(m.get("content"), str) and m["content"].startswith("QA_")]
+        if messages[0]["content"] == COMPACTION_SYSTEM:
+            state["summaries"] += 1
+            payload = json.loads(messages[1]["content"])
+            labels = list(dict.fromkeys(re.findall(r"QA_[A-Z0-9_]+", json.dumps(payload, ensure_ascii=False))))
+            summary = {"goal": "保留同一报告的追问上下文", "constraints": ["保持截止日，未核验数字不冒充事实"],
+                "completed": labels[-20:], "decisions": ["精确事实回查原始笔记"], "openQuestions": ["继续回答当前问题"],
+                "evidence": [{"sourceId": DOC_ID, "page": 1}]}
+            return {"role": "assistant", "content": json.dumps(summary, ensure_ascii=False)}, USAGE
+        queries = []
+        for message in messages:
+            content = message.get("content", "")
+            if message["role"] != "user" or not isinstance(content, str):
+                continue
+            if content.startswith("QA_"):
+                queries.append(content.split()[0])
+            elif '"type":"compacted_research_context"' in content:
+                queries.extend(json.loads(content)["summary"]["completed"])
         query = queries[-1]
+        latest = max(i for i, m in enumerate(messages) if m["role"] == "user" and str(m.get("content", "")).startswith("QA_"))
         if query == "QA_INTERRUPT":
             await asyncio.sleep(45)
         if query == "QA_FAIL_AUTH":
@@ -47,7 +76,9 @@ def worker(port):
         if query == "QA_TRANSIENT" and not state["transient"]:
             state["transient"] += 1
             raise ModelServiceError("MODEL_TIMEOUT", "隔离测试：临时超时", 504)
-        if query == "QA_TOOL" and not any(m["role"] == "tool" for m in messages):
+        if query in {"QA_TOOL", "QA_RECALL"} and not any(m["role"] == "tool" for m in messages[latest + 1:]):
+            if query == "QA_RECALL":
+                return {"role": "assistant", "content": None, "tool_calls": [tool_call(2, 0, "recall_research_context", {"kind": "reading_notes", "sourceId": DOC_ID, "batch": 0})]}, USAGE
             return {"role": "assistant", "content": None, "tool_calls": [tool_call(1, 0, "read_document", {"documentId": DOC_ID, "mode": "page", "page": 1})]}, USAGE
         revise = "当前操作：revise" in messages[-1]["content"]
         edits = []
@@ -62,6 +93,7 @@ def worker(port):
     jobs.load_model_settings = lambda: SETTINGS
     jobs.get_research_tools = lambda: tools
     agent_runner.complete_turn = completion
+    jobs.DiscussionRunner = QaDiscussion
 
     @app.post("/qa/seed")
     async def seed():
@@ -182,6 +214,33 @@ def main():
         status, _ = bridge.request(base, prefix + "/chat", "POST", {**body, "message": " "})
         check("空问题在边界返回422", status == 422)
 
+        compacted_turn = first_turn
+        compacted_job = None
+        for index in range(16):
+            candidate, compacted_turn, _ = send(f"QA_FILL_{index} " + "用于模拟长对话的历史材料。" * 290, compacted_turn["id"])
+            assert candidate["status"] == "completed", candidate.get("error")
+            if any(e["type"] == "compaction_completed" for e in candidate["events"]):
+                compacted_job = candidate
+                break
+        check("连续真实HTTP追问自动触发摘要后仍回答成功", compacted_job is not None and "QA_FIRST" in compacted_turn["answer"])
+        event = next(e for e in compacted_job["events"] if e["type"] == "compaction_completed")
+        check("上下文实际缩小，报告、原页阅读覆盖不变", event["afterCharacters"] < event["beforeCharacters"] * 0.9 and compacted_job["coverage"] == first["coverage"]
+            and bridge.request(base, prefix + "/discussion")[1]["versions"][0] == original["versions"][0])
+        _, persisted = bridge.request(base, f"/internal/sessions/runs/{compacted_job['taskId']}")
+        marker = next(e for e in persisted["entries"] if e["type"] == "compaction" and not e.get("restored"))
+        check("Java保留摘要边界与完整旧对话JSONL", marker.get("firstKeptEntryId") and any(e.get("message", {}).get("content") == "QA_FIRST" for e in persisted["entries"]))
+        recalled, recall_turn, _ = send("QA_RECALL", compacted_turn["id"])
+        check("压缩后可真实调用本地笔记回查工具，无需重新通读", recalled["status"] == "completed" and any(e["type"] == "tool_finished" and e.get("name") == "recall_research_context" and e.get("status") == "completed" for e in recalled["events"]))
+        # 暂时移走本次检查点，实际验证仅JSONL降级也沿所选父链恢复摘要。
+        checkpoint = FOLDER / "evidence/run-checkpoints" / f"{recalled['taskId']}.json"
+        backup = checkpoint.with_suffix(".backup")
+        checkpoint.replace(backup)
+        try:
+            fallback, fallback_turn, _ = send("QA_JSONL", recall_turn["id"])
+        finally:
+            backup.replace(checkpoint)
+        check("缺少检查点时仅用当前分支JSONL恢复摘要和证据", fallback["status"] == "completed" and "QA_FIRST" in fallback_turn["answer"] and "QA_SIBLING" not in fallback_turn["answer"])
+
         agent.terminate(); agent.wait(timeout=10)
         agent = start_agent()
         bridge.stop_java(process, log); process, log = None, None
@@ -194,6 +253,9 @@ def main():
         before = bridge.request(provider_base, "/qa/calls")[1]["calls"]
         status, _ = bridge.request(base, prefix + "/chat", "POST", body)
         check("重启后相同请求标识也不会重启收费调用", status == 409 and bridge.request(provider_base, "/qa/calls")[1]["calls"] == before)
+        continued, continued_turn, _ = send("QA_COMPACT_RESTART", fallback_turn["id"])
+        check("双服务重启后复用摘要继续，旧分支目标与笔记仍可用", continued["status"] == "completed" and "QA_FIRST" in continued_turn["answer"]
+            and "QA_SIBLING" not in continued_turn["answer"] and not any(e["type"] == "compaction_started" for e in continued["events"]))
         _, interrupted = bridge.request(base, prefix + "/chat", "POST", {"message": "QA_INTERRUPT", "parentId": root, "action": "ask", "requestId": str(uuid4())})
         agent.kill(); agent.wait(timeout=10)
         _, saved_pending = bridge.request(base, prefix + "/discussion")
@@ -211,7 +273,7 @@ def main():
                 break
             time.sleep(0.1)
         check("停止对话结束活动流并保留原版本", status == 200 and cancelled["status"] == "cancelled")
-        (FOLDER / "result.json").write_text(json.dumps({"checks": checks, "discussion": saved}, ensure_ascii=False), encoding="utf-8")
+        (FOLDER / "result.json").write_text(json.dumps({"checks": checks, "discussion": saved, "compactionJob": compacted_job}, ensure_ascii=False), encoding="utf-8")
         print(f"{len(checks)}项隔离集成检查通过；真实模型调用0次。", flush=True)
     finally:
         if process:
