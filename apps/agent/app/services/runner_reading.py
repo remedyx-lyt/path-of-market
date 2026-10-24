@@ -170,6 +170,7 @@ class ReadingMixin:
                 f"{metadata['title']}：已处理 {len(progress['processedPages'])}/{progress['pageCount']} 页文本",
                 sourceId=identifier,
             )
+            self.checkpoint()
 
     async def batch_note(self, identifier, metadata, batch, cursor, file_sha256, cache):
         """一批原文交给模型阅读。笔记与研究问题无关（通读要点），同一文件换问题也能复用，避免整本重读。"""

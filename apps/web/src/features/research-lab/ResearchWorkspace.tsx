@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import type { FormEvent } from 'react'
-import { generateReport, waitForAgent, cancelAgentJob, getAgentJob, ResearchApiError } from '../../api/research'
+import { generateReport, waitForAgent, cancelAgentJob, getAgentJob, continueAgentJob, ResearchApiError } from '../../api/research'
 import { ResearchPreview } from './ResearchPreview'
 import { RecentSessions } from './RecentSessions'
 import { characterCount, normalizeDraft, OMENS, validateDraft } from './researchDraft'
@@ -42,6 +42,20 @@ export function ResearchWorkspace() {
       } else {
         sessionStorage.setItem('path-of-market-active-job', taskId)
         dispatch({ type: 'jobOpened', job: next })
+        if (['queued', 'running'].includes(next.status)) {
+          // 打开正在执行的任务链接时自动恢复轮询；只读进度，不重新创建研究。
+          requestRef.current = controller
+          dispatch({ type: 'resumeStarted' })
+          void waitForAgent(taskId, controller.signal, (progress) => {
+            if (requestRef.current === controller) dispatch({ type: 'jobProgress', job: progress })
+          }).then((result) => {
+            if (requestRef.current === controller) dispatch({ type: 'agentReportLoaded', report: result, message: '研究结果已返回。' })
+          }).catch((error) => {
+            if (!controller.signal.aborted && requestRef.current === controller && error instanceof ResearchApiError) dispatch({ type: 'requestFailed', error })
+          }).finally(() => {
+            if (requestRef.current === controller) { requestRef.current = null; dispatch({ type: 'requestFinished' }) }
+          })
+        }
       }
     }).catch((error) => { if (!controller.signal.aborted && error instanceof ResearchApiError) dispatch({ type: 'requestFailed', error }) })
     return () => controller.abort()
@@ -116,6 +130,25 @@ export function ResearchWorkspace() {
       const notFound = failure.code === 'RESEARCH_NOT_FOUND'
       if (notFound) sessionStorage.removeItem('path-of-market-active-job')
       dispatch({ type: 'requestFailed', error: failure, clearResume: notFound })
+    } finally {
+      if (requestRef.current === controller) { requestRef.current = null; dispatch({ type: 'requestFinished' }) }
+    }
+  }
+
+  async function continueResearch() {
+    if (report?.mode !== 'agent' || report.run.status !== 'partial' || requestRef.current) return
+    const controller = new AbortController()
+    requestRef.current = controller
+    dispatch({ type: 'resumeStarted' })
+    try {
+      const result = await continueAgentJob(report.run.taskId, controller.signal, (next) => {
+        if (requestRef.current === controller) dispatch({ type: 'submitProgress', job: next })
+      })
+      if (requestRef.current !== controller) return
+      dispatch({ type: 'agentReportLoaded', report: result,
+        message: result.run.status === 'completed' ? '接续研究已完成，之前的已读资料已保留。' : '已保留接续进展，请查看本次停止原因。' })
+    } catch (error) {
+      if (requestRef.current === controller) dispatch({ type: 'requestFailed', error: error instanceof ResearchApiError ? error : new ResearchApiError('接续研究未启动。', 'RESEARCH_NOT_RESUMABLE') })
     } finally {
       if (requestRef.current === controller) { requestRef.current = null; dispatch({ type: 'requestFinished' }) }
     }
@@ -250,7 +283,7 @@ export function ResearchWorkspace() {
         </form>
         <RecentSessions refreshKey={isGenerating ? 'running' : report} />
       </section>
-      <ResearchPreview draft={preview} report={report} isGenerating={isGenerating} hasError={!!requestError} job={mode === 'agent' ? job : null} />
+      <ResearchPreview draft={preview} report={report} isGenerating={isGenerating} hasError={!!requestError} job={mode === 'agent' ? job : null} onContinue={() => void continueResearch()} />
     </div>
   )
 }

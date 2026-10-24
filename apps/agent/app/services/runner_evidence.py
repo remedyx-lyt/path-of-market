@@ -50,7 +50,19 @@ def consolidated_text(pages, number):
 
 class EvidenceMixin:
     def financial_data(self):
-        return build_financial_data(self.financial_points, self.financial_gaps)
+        result = build_financial_data(self.financial_points, self.financial_gaps)
+        # 旧 JSONL 只保存了展示的近3年原值，最早一年的同比基数可能未在展示行里。
+        # 保留旧报告已计算的同比，绝不由同比反推基数；原值或来源有变则重新计算。
+        saved = getattr(self, "restored_financial", None) or {}
+        old_rows = {(d["id"], r["year"]): r for d in saved.get("datasets", []) for r in d["rows"]}
+        for dataset in result["datasets"]:
+            for row in dataset["rows"]:
+                old = old_rows.get((dataset["id"], row["year"]))
+                if old and old["values"] == row["values"] and old["evidence"] == row["evidence"]:
+                    for metric, growth in row["yoy"].items():
+                        if growth["reason"] == "缺少上年同期间数据" and metric in old["yoy"]:
+                            row["yoy"][metric] = old["yoy"][metric].copy()
+        return result
 
     def business_data(self):
         return build_business_data(self.segment_points, self.financial_data(), self.business_gaps)
@@ -140,12 +152,12 @@ class EvidenceMixin:
         }
         self.extraction_readings.append(record)
         self.job.emit("data_extracted", f"正文取数完成：{len(points)}个财务值、{len(segments)}个业务收入值", **record)
+        self.checkpoint()
         return {**record, "financialData": self.financial_data(), "businessData": self.business_data()}
 
     async def detail_data(self, identifier):
         if not self.job.request.include_financials or identifier in self.detail_checked:
             return
-        self.detail_checked.add(identifier)
         metadata, pages = await asyncio.to_thread(self.tools.store.loaded, identifier)
         selected = locate_detail_pages(pages)
         for start in range(0, len(selected), 2):
@@ -154,6 +166,8 @@ class EvidenceMixin:
             except ToolError as error:
                 self.business_gaps.append(metadata["title"] + "：" + error.message)
                 self.job.emit("data_gap", error.message, sourceId=identifier)
+        self.detail_checked.add(identifier)
+        self.checkpoint()
 
     async def inspect(self, arguments, *, origin="model_tool"):
         args = InspectArguments.model_validate(arguments)
@@ -229,6 +243,7 @@ class EvidenceMixin:
             pages=args.pages,
             originRunId=record["originRunId"],
         )
+        self.checkpoint()
         return {
             **record,
             "financialData": self.financial_data(),

@@ -40,6 +40,9 @@ class Provider(BaseHTTPRequestHandler):
                 "progress": "fixture", "events": [], "toolCalls": [], "sources": [], "coverage": [], "modelCalls": 0,
                 "usage": {}, "report": None, "error": None}
         status = 202 if self.command == "POST" else 200
+        if self.path.endswith("/continue"):
+            body["parentTaskId"] = TASK if mode != "wrong-parent" else "wrong-parent"
+            body["taskId"] = "22222222-2222-4222-8222-222222222222"
         if mode == "complete":
             body["report"] = {"mode": "agent", "isMock": False, "title": "报告", "summary": "完成",
                 "sections": [{"heading": "一", "content": "内容", "citations": []}, {"heading": "二", "content": "内容", "citations": []}],
@@ -47,9 +50,9 @@ class Provider(BaseHTTPRequestHandler):
         if mode == "wrong-id": body["taskId"] = "22222222-2222-4222-8222-222222222222"
         if mode == "bad-state": body["status"] = "imagined"
         if mode == "bad-report": body["report"] = {"mode": "agent", "isMock": True}
-        if mode in {"busy", "not-found", "unknown-error"}:
-            status = {"busy": 409, "not-found": 404, "unknown-error": 503}[mode]
-            body = {"error": {"code": {"busy": "RESEARCH_BUSY", "not-found": "RESEARCH_NOT_FOUND", "unknown-error": "PRIVATE_CODE"}[mode],
+        if mode in {"busy", "not-found", "unknown-error", "not-resumable"}:
+            status = {"busy": 409, "not-found": 404, "unknown-error": 503, "not-resumable": 409}[mode]
+            body = {"error": {"code": {"busy": "RESEARCH_BUSY", "not-found": "RESEARCH_NOT_FOUND", "unknown-error": "PRIVATE_CODE", "not-resumable": "RESEARCH_NOT_RESUMABLE"}[mode],
                               "message": "private-fixture-body-must-not-leak"}}
         if mode == "validation":
             status = 422
@@ -92,7 +95,10 @@ if __name__ == "__main__":
             ("bad-report", "GET", "/" + TASK, 502), ("bad-json", "GET", "/" + TASK, 502),
             ("busy", "POST", "", 409), ("not-found", "GET", "/" + TASK, 404),
             ("unknown-error", "GET", "/" + TASK, 502), ("validation", "POST", "", 422),
-            ("slow", "GET", "/" + TASK, 504)]:
+            ("slow", "GET", "/" + TASK, 504),
+            ("queued", "POST", "/" + TASK + "/continue", 202),
+            ("wrong-parent", "POST", "/" + TASK + "/continue", 502),
+            ("not-resumable", "POST", "/" + TASK + "/continue", 409)]:
             state["mode"] = mode
             status, body = request(base, "/api/research/jobs" + path, method, {"target": "fixture"} if method == "POST" else None)
             assert status == expected, (mode, status, body)

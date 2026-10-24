@@ -63,7 +63,7 @@ Python AgentRunner                          Java SessionStore                   
 
 ## 未做 / 边界
 
-- 只有一条当前分支；分支、回退、从会话恢复模型上下文继续研究，随 M2-4 侧边聊天实施（上下文按 `parentId` 链重建、`context_edit` 生效）。
+- 2026-10-24 晚已提前实现未完成任务接续：按当前 `parentId` 链重建消息并应用 `context_edit`；Python 执行检查点保存笔记/证据/写作进度，Java JSONL 新增 `continuation` 与 `report_draft` 条目。新运行关联原任务、旧结果不改；逐节正文校验后保存，失败从未完成章节继续。实际范围与验证见 [调用预算与接续](budget-and-continuation.md)。交互式分支/回退、侧边聊天仍随 M2-4 实施。
 - 没有 compaction 条目（M2-5）。
 - 研究进行中如果 Java 不可用，条目暂存在 Python 进程内并重试；若 Python 也在此期间退出，未提交的条目会丢失（快照的 `persistence.unsent` 会显示积压）。
 - 写入接口没有鉴权（只监听本机）；部署到多人环境前需加鉴权。

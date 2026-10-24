@@ -115,6 +115,11 @@ class FakeModel:
         self.calls = []  # (kind, max_tokens, messages, kwargs)
 
     def kind(self, messages, kwargs):
+        last = str(messages[-1].get("content", ""))
+        if last.startswith("WRITE_REPORT_SECTION\n"):
+            return "section"
+        if last.startswith("WRITE_REPORT_METADATA\n"):
+            return "metadata"
         if kwargs.get("tools") and kwargs.get("tool_choice", "auto") != "none":
             return "decision"
         system = messages[0]["content"]
@@ -169,6 +174,11 @@ class FakeModel:
             return {"role": "assistant", "content": reply if isinstance(reply, str) else json.dumps(reply, ensure_ascii=False)}, USAGE
         if kind == "compose":
             return {"role": "assistant", "content": json.dumps(self.final, ensure_ascii=False)}, USAGE
+        if kind == "section":
+            task = json.JSONDecoder().raw_decode(messages[-1]["content"].split("\n", 1)[1])[0]
+            return {"role": "assistant", "content": json.dumps(self.final["sections"][task["sectionIndex"]], ensure_ascii=False)}, USAGE
+        if kind == "metadata":
+            return {"role": "assistant", "content": json.dumps({k: self.final.get(k, []) for k in ["summary", "omenCoverage"]}, ensure_ascii=False)}, USAGE
         step = len([c for c in self.calls if c[0] == "decision"])
         action = self.script[min(step, len(self.script)) - 1]
         if action == "final":

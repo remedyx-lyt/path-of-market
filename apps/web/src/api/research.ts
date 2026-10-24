@@ -95,6 +95,7 @@ export type ResearchJob = {
   taskId: string; status: 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'; target: string
   progress: string; modelCalls: number; usage: Record<string, number>; coverage: ReadCoverage[]
   phase?: string
+  parentTaskId?: string | null
   events: JobEvent[]
   report: AgentResearchReport | null; error: { code: string; message: string } | null
 }
@@ -247,6 +248,15 @@ export async function listSessions(signal?: AbortSignal): Promise<SessionSummary
 
 export async function cancelAgentJob(taskId: string) { return jobRequest(`/${taskId}`, 'DELETE') }
 export async function getAgentJob(taskId: string, signal?: AbortSignal) { return jobRequest(`/${taskId}`, 'GET', signal) }
+
+/** 接续未完成任务，复用已读上下文；会产生新的模型调用，普通查看/恢复轮询不会调用此入口。 */
+export async function continueAgentJob(taskId: string, signal: AbortSignal, onProgress?: (job: ResearchJob) => void) {
+  const job = await jobRequest(`/${taskId}/continue`, 'POST', signal)
+  sessionStorage.setItem('path-of-market-active-job', job.taskId)
+  window.history.replaceState(null, '', `?task=${job.taskId}`)
+  onProgress?.(job)
+  return waitForAgent(job.taskId, signal, onProgress)
+}
 
 export async function waitForAgent(taskId: string, signal: AbortSignal, onProgress?: (job: ResearchJob) => void): Promise<AgentResearchReport> {
   try {

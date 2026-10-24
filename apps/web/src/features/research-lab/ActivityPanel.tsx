@@ -15,6 +15,7 @@ const NOTES = new Set(['current_period_lookup', 'skill_read', 'data_extracted', 
   'report_normalized', 'figure_duplicates_removed', 'unknown_figures_removed', 'required_figures_placed', 'tables_dropped',
   'review_discarded', 'report_drafting_fallback', 'methods_plan_failed', 'run_partial', 'run_failed', 'run_cancelled'])
 for (const type of ['methods_plan_invalid', 'reading_note_invalid', 'reading_batch_split', 'reading_batch_retry', 'reading_batch_failed']) NOTES.add(type)
+for (const type of ['run_resumed', 'budget_wrapup', 'checkpoint_failed', 'writing_unit_retry', 'writing_unit_failed']) NOTES.add(type)
 
 type Item =
   | { kind: 'phase'; id: string; text: string }
@@ -53,12 +54,12 @@ export function timeline(events: JobEvent[]): Item[] {
     } else if (e.type === 'model_finished' && e.modelCall != null && models.has(e.modelCall)) {
       Object.assign(models.get(e.modelCall)!, { running: false, durationMs: e.durationMs, tokens: e.usage?.total_tokens })
     } else if (e.type === 'model_failed') {
-      if (lastSection && (e.purpose === '撰写正文' || e.purpose === '整理数据表')) lastSection.failed = true
+      if (lastSection && !lastSection.done && (e.purpose === '撰写正文' || e.purpose === '整理数据表')) lastSection.failed = true
       if (e.modelCall != null && models.has(e.modelCall)) {
         Object.assign(models.get(e.modelCall)!, { running: false, failed: true, text: e.message, durationMs: e.durationMs, tokens: e.usage?.completion_tokens })
       } else items.push({ kind: 'note', id: e.id, text: e.message, warn: true })
     } else if (e.type === 'run_failed' || e.type === 'run_cancelled' || e.type === 'run_partial') {
-      if (lastSection) lastSection.failed = true
+      if (lastSection && !lastSection.done) lastSection.failed = true
       for (const tool of tools.values()) if (tool.status === 'running') Object.assign(tool, { status: 'interrupted', result: '任务已停止，此动作未完成' })
       for (const model of models.values()) if (model.running) Object.assign(model, { running: false, failed: true, text: model.text + '（未完成）' })
       items.push({ kind: 'note', id: e.id, text: e.message, warn: true })
@@ -68,6 +69,8 @@ export function timeline(events: JobEvent[]): Item[] {
       if (lastSection) lastSection.done = true
       lastSection = { kind: 'section', id: e.id, text: e.message, done: false }
       items.push(lastSection)
+    } else if (e.type === 'writing_section_saved') {
+      if (lastSection && lastSection.text.includes(e.title ?? '')) Object.assign(lastSection, { done: true, failed: false })
     } else if (NOTES.has(e.type)) {
       items.push({ kind: 'note', id: e.id, text: e.message, warn: /failed|dropped|discarded|partial|gap|fallback|cancelled/.test(e.type) })
     }

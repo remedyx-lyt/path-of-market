@@ -7,7 +7,11 @@ from datetime import datetime, timezone
 @dataclass(frozen=True)
 class RunLimits:
     max_steps: int = 18
-    max_model_calls: int = 72
+    # 包含方法、分批通读、取数、决策与写作。三份无缓存长报告实测取证已需72次；
+    # 除提高长资料容量，还单独保留收尾空间，防止所有调用在正文前用完。
+    max_model_calls: int = 144
+    report_reserve_calls: int = 24  # 大纲、最多12节、摘要、数据表与复核，以及局部重试
+    report_reserve_tokens: int = 200_000
     # 累计 token 预算。上下文上限翻倍、写作分正文与数据表两步后，单次研究约 0.9–1.3M（多数为缓存命中，约 1/50 价格）。
     max_tokens: int = 2_000_000
     max_seconds: float = 1200

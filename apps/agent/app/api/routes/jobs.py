@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 from app.core.config import ModelServiceError, load_model_settings
 from app.schemas.agent import AgentResearchRequest
 from app.services.research_jobs import job_store
+from app.services.research_recovery import load_recovery, recovery_error
+from app.tools.registry import get_research_tools
 
 router = APIRouter(prefix="/research/jobs", tags=["研究 Agent"])
 
@@ -28,6 +30,7 @@ async def create_job(request: AgentResearchRequest):
         settings = load_model_settings()
     except ModelServiceError as error:
         return JSONResponse(status_code=error.status, content={"error": {"code": error.code, "message": error.message}})
+
     job = job_store.start(request, settings)
     if job is None:
         return JSONResponse(
@@ -40,6 +43,35 @@ async def create_job(request: AgentResearchRequest):
 async def get_job(task_id: UUID):
     job = job_store.jobs.get(str(task_id))
     return job.snapshot() if job else missing()
+
+
+@router.post("/{task_id}/continue", status_code=202)
+async def continue_job(task_id: UUID):
+    """新运行关联旧任务，保留旧结果；恢复操作只有用户明确提交时才开始收费调用。"""
+    try:
+        parent = job_store.jobs.get(str(task_id))
+        if parent and parent.status in {"queued", "running"}:
+            raise recovery_error("原研究仍在运行，请先查看进度。")
+        existing = next((j for j in job_store.jobs.values() if j.parent_task_id == str(task_id)), None)
+        if existing:
+            return existing.snapshot()
+        settings = load_model_settings()
+        recovery = await asyncio.to_thread(load_recovery, get_research_tools(), str(task_id))
+        if recovery.get("status") == "completed":
+            raise recovery_error("研究已完成，无需接续。")
+        if recovery.get("model") and recovery["model"] != settings.model:
+            raise recovery_error("当前模型与原任务不同，请恢复原模型配置后接续。")
+        if recovery.get("baseUrl") and recovery["baseUrl"] != settings.base_url:
+            raise recovery_error("当前模型服务与原任务不同，请恢复原接口地址后接续。")
+        request = AgentResearchRequest.model_validate(recovery["request"])
+        job = job_store.start(request, settings, recovery=recovery)
+        if job is None:
+            return JSONResponse(status_code=409, content={"error": {"code": "RESEARCH_BUSY", "message": "已有研究正在运行。"}})
+        return job.snapshot()
+    except ModelServiceError as error:
+        return JSONResponse(status_code=error.status, content={"error": {"code": error.code, "message": error.message}})
+    except (ValueError, KeyError, TypeError):
+        return JSONResponse(status_code=409, content={"error": {"code": "RESEARCH_NOT_RESUMABLE", "message": "保存的进度不完整或格式不兼容，未开始新的模型调用；可重新研究。"}})
 
 
 @router.delete("/{task_id}")

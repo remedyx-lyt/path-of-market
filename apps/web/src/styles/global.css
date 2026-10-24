@@ -29,6 +29,8 @@ button { border: 0; }
 .header-caption { padding-left: 28px; border-left: 1px solid #e5e5e5; color: #666; font-size: 13px; }
 main { max-width: 1256px; margin: 0 auto; padding: 52px 48px 64px; }
 .workspace-layout { display: grid; grid-template-columns: minmax(0, 1.23fr) minmax(0, 1fr); gap: 72px; align-items: start; }
+.continuation-actions { margin: 24px 0; padding: 20px 0; border-block: 1px solid #dedfd7; }
+.continuation-actions p { color: #555; font-size: 13px; line-height: 1.7; margin-bottom: 0; }
 .eyebrow { margin: 0; font-family: "Cascadia Code", Consolas, monospace; color: #737373; font-size: 12px; font-weight: 500; line-height: 1.6; letter-spacing: 0.05em; }
 .workspace-intro .eyebrow span { margin: 0 10px; color: #aaa; }
 h1 { margin: 16px 0 20px; font-size: 56px; font-weight: 900; line-height: 1.15; }

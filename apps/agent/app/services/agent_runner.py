@@ -5,7 +5,8 @@ AgentRunner 由几部分组成，各自拥有一块运行状态：
 - runner_evidence.EvidenceMixin：原页视觉核对、正文取数、财务/业务底稿
 - runner_methods.MethodMixin：按问题与预兆选择原版方法并形成研究计划
 - runner_omens.OmenMixin：预兆规格进入上下文、写作要求与覆盖自检（M1-4）
-- runner_report.ReportMixin：报告写作、程序核查、复核与最终结构
+- runner_writing.WritingMixin：大纲、逐节生成/保存、失败单元恢复与摘要
+- runner_report.ReportMixin：程序核查、数据表、复核与最终结构
 本文件只保留循环本身：预算、模型调用、工具分派、上下文组装。
 """
 
@@ -29,8 +30,10 @@ from app.services.runner_methods import MethodMixin
 from app.services.runner_omens import OmenMixin
 from app.services.runner_reading import ReadingMixin
 from app.services.runner_report import ReportMixin, compact_financial, strip_quotes
+from app.services.runner_writing import WritingMixin
 from app.services.runtime import BudgetStop, RunLimits, now
 from app.services.session_recorder import RecordedMessages
+from app.services.research_recovery import pending_calls, restore_runner, save_checkpoint
 from app.tools.contracts import FindArguments, ToolError
 from app.tools.documents import write_json
 from app.tools.market import MarketArguments
@@ -160,13 +163,14 @@ class ToolView:
         return cls(content, projected, excerpt, bool(pages))
 
 
-class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMixin):
-    def __init__(self, job, tools, settings, *, limits=None, completion=None):
+class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMixin, ReportMixin):
+    def __init__(self, job, tools, settings, *, limits=None, completion=None, recovery=None):
         self.job, self.tools, self.settings = job, tools, settings
         self.limits = limits or RunLimits()
         self.completion = completion or complete_turn
         self.began = time.monotonic()
-        self.messages = initial_messages(job.request)
+        self.recovery = recovery
+        self.messages = recovery["messages"] if recovery else initial_messages(job.request)
         if job.recorder:  # 会话持久化：每条消息（含完整工具结果）同时记入 JSONL
             self.messages = RecordedMessages(self.messages, job.recorder)
         self.skill = load_research_skill()
@@ -190,11 +194,25 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
         # 数值证据（runner_evidence）
         self.visual_readings, self.extraction_readings = [], []
         self.financial_points, self.financial_gaps = [], []
+        self.restored_financial = None  # 旧会话已保存的派生同比；不反推缺失的历史原值
         self.segment_points, self.business_gaps = [], []
         self.financial_checked, self.detail_checked = set(), set()
         self.document_cache = {}  # sourceId → 逐页文字，供表格核对与经营数据页定位
         # 方法计划（runner_methods）
         self.method_usage = None
+        self.report_candidate = None
+        self.report_stage = None
+        self.writing_state = None
+        self.writer_tools_rejected = False
+        if recovery:
+            restore_runner(self, recovery)
+
+    def checkpoint(self):
+        try:
+            save_checkpoint(self)
+        except OSError:
+            logger.exception("checkpoint write failed for %s", self.job.task_id)
+            self.job.emit("checkpoint_failed", "执行检查点写入失败；已提交的会话记录仍保留")
 
     @property
     def uses_real_provider(self):
@@ -205,15 +223,24 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
 
     # ---- 预算与模型调用 -------------------------------------------------
 
-    def check_budget(self):
+    def check_budget(self, *, model_call=False, report=False):
         if self.job.cancel_requested:
             raise asyncio.CancelledError
         if time.monotonic() - self.began >= self.limits.max_seconds:
             raise BudgetStop("time_budget")
+        # 本地回查/缓存读取不消耗模型调用，不能因为达到模型上限就禁止它们。
+        if not model_call:
+            return
         if self.job.model_calls >= self.limits.max_model_calls:
             raise BudgetStop("model_call_budget")
         if self.job.usage.get("total_tokens", 0) >= self.limits.max_tokens:
             raise BudgetStop("token_budget")
+        reserve = min(self.limits.report_reserve_calls, max(0, self.limits.max_model_calls - 12))
+        if not report and reserve and self.job.model_calls >= self.limits.max_model_calls - reserve:
+            raise BudgetStop("research_call_budget")
+        token_reserve = min(self.limits.report_reserve_tokens, self.limits.max_tokens // 10)
+        if not report and self.job.usage.get("total_tokens", 0) >= self.limits.max_tokens - token_reserve:
+            raise BudgetStop("research_token_budget")
 
     def record_usage(self, usage):
         for key, value in usage.items():
@@ -231,10 +258,10 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
             return "决定下一步"
         return PHASE_PURPOSE.get(self.job.phase, "提取数据")
 
-    async def model(self, messages, *, tool_specs=None, reading=False, visual=False, report=False, write_only=False, on_text=None):
+    async def model(self, messages, *, tool_specs=None, reading=False, visual=False, report=False, write_only=False, on_text=None, output_limit=None):
         """write_only=True：发送同一组工具定义但禁止调用（tool_choice=none）并要求 JSON，让写作请求与研究轮次共享缓存前缀。
         on_text：流式输出时逐段收到模型文字（写作阶段据此显示“正在写：××”）。"""
-        self.check_budget()
+        self.check_budget(model_call=True, report=report)
         if context_characters(messages) > self.limits.max_context_characters:
             raise BudgetStop("context_budget")
         self.job.model_calls += 1
@@ -243,6 +270,8 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
         # 多预兆报告允许更长：每个预兆追加输出预算，不为篇幅牺牲预兆分析。
         report_tokens = self.limits.report_tokens + 2500 * len(self.job.request.omens)
         output_tokens = self.settings.reading_max_tokens if reading else report_tokens if report else 6500
+        if output_limit is not None:
+            output_tokens = min(output_tokens, output_limit)
         self.job.emit("model_started", purpose, modelCall=self.job.model_calls, purpose=purpose, outputTokenLimit=output_tokens)
         # 累计预算以供应商实际用量记账，下一调用前检查；单次也有明确输出/时间上限。
         # 写作/复核输出整篇报告，使用单独的等待上限；研究轮次仍用较短上限。
@@ -434,8 +463,15 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
         try:
             if wants_to_write(assistant.get("content")):
                 assistant = await self.compose()
+            tables_done = self.report_stage == "tables"
             content = self.validate_content(assistant)
-            content = await self.add_tables(content)
+            self.report_candidate = content.model_dump(mode="json", by_alias=True)
+            self.checkpoint()
+            if not tables_done:
+                content = await self.add_tables(content)
+                self.report_stage = "tables"
+            self.report_candidate = content.model_dump(mode="json", by_alias=True)
+            self.checkpoint()
             content = await self.review(content)
             self.job.report = self.report(content)
             self.job.status = "completed"
@@ -455,6 +491,8 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
             # 错误草稿不反复堆入主上下文；事实与完整来源仍保留。
             self.messages.pop()
             self.invalid_finals += 1
+            self.report_candidate = None
+            self.report_stage = None
             self.job.emit("report_validation_failed", "报告需修正：" + diagnostics[:300])
             self.job.set_phase("research", "阶段：按核查意见修改或补查")
             if self.invalid_finals >= 3:
@@ -516,6 +554,7 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
             result=outcome,
             durationMs=round((time.monotonic() - started) * 1000),
         )
+        self.checkpoint()
 
     def document_title(self, identifier):
         document = self.sources.get(identifier) or self.discovered.get(identifier) or {}
@@ -576,9 +615,22 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
         self.job.emit("run_started", "开始研究；模型将选择需要的报告和行情")
         try:
             async with asyncio.timeout(self.limits.max_seconds):
-                self.job.set_phase("methods", "阶段：阅读研究方法、形成研究计划")
-                await self.prepare_methods()
+                if not self.recovery or self.method_usage is None:
+                    self.job.set_phase("methods", "阶段：阅读研究方法、形成研究计划")
+                    await self.prepare_methods()
+                    self.checkpoint()
                 self.job.set_phase("research", "阶段：取证——查找、阅读与回查资料")
+                if self.recovery:
+                    # 原任务可能停在一组工具调用的中间；先配齐缺失结果，再继续模型决策。
+                    for call in pending_calls(self.messages):
+                        await self.run_tool_call(call)
+                    self.messages.append({"role": "user", "content": "继续完成原研究。已保存的阅读、方法与底稿继续有效，不要重新通读已完成资料；仅补必要证据（如行情），然后撰写报告。"})
+                    if self.report_candidate or self.writing_state:
+                        assistant = ({"role": "assistant", "content": json.dumps(self.report_candidate, ensure_ascii=False)}
+                                     if self.report_candidate else await self.compose())
+                        self.messages.append(assistant)
+                        if await self.finish(assistant):
+                            return
                 for step in range(1, self.limits.max_steps + 1):
                     self.steps = step
                     self.check_budget()
@@ -604,6 +656,21 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
                 raise BudgetStop("step_budget")
         except (BudgetStop, TimeoutError) as error:
             reason = str(error) or "time_budget"
+            # 取证预算提前触发，写作预算仍可用；有完整基本证据时主动收尾，而非一律返回空报告。
+            if reason in {"research_call_budget", "research_token_budget", "step_budget"} and self.can_budget_finish():
+                try:
+                    for call in pending_calls(self.messages):
+                        self.messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps({
+                            "status": "failed", "error": {"code": "RESEARCH_BUDGET_RESERVED", "message": "取证预算已用完，保留调用空间撰写报告。"}})})
+                    self.context_wrapup = True
+                    self.job.emit("budget_wrapup", "取证预算接近上限，使用预留调用空间完成正文、表格和复核", reason=reason)
+                    for _ in range(2):
+                        assistant = await self.compose()
+                        self.messages.append(assistant)
+                        if await self.finish(assistant):
+                            return
+                except (BudgetStop, ModelServiceError) as final_error:
+                    reason = final_error.code if isinstance(final_error, ModelServiceError) else str(final_error)
             self.job.report = self.report(reason=reason)
             self.job.status = "partial"
             self.job.emit("run_partial", "已保留部分结果：" + reason)
@@ -628,8 +695,14 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
             for record in self.job.tool_calls:
                 if record["status"] == "running":
                     record.update(status="interrupted", finishedAt=now())
+            self.checkpoint()
             if self.job.recorder:
                 await self.persist_outcome()
+
+    def can_budget_finish(self):
+        return bool(self.coverage) and all(c["textComplete"] for c in self.coverage.values()) and (
+            not self.job.request.include_market or self.market_data is not None
+        ) and (not self.job.request.include_current_period or self.current_period_checked)
 
     async def persist_outcome(self):
         """研究结束（完成、部分、失败或取消）：记报告与结束状态，再把剩余条目提交给会话存储。"""

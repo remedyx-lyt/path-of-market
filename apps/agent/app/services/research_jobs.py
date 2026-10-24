@@ -29,6 +29,7 @@ class ResearchJob:
     cancel_requested: bool = False
     task: object = field(default=None, repr=False)
     recorder: object = field(default=None, repr=False)  # SessionRecorder；单元测试直接构造的任务没有
+    parent_task_id: str | None = None
 
     def emit(self, event_type, message, **details):
         event = {
@@ -72,6 +73,7 @@ class ResearchJob:
             "error": self.error,
             "storage": "session_jsonl" if self.recorder else "process_memory",
             "persistence": self.recorder.status() if self.recorder else None,
+            "parentTaskId": self.parent_task_id,
         }
 
 
@@ -79,18 +81,27 @@ class JobStore:
     def __init__(self):
         self.jobs = {}
 
-    def start(self, request, settings):
+    def start(self, request, settings, *, recovery=None):
+        if recovery:
+            previous = next((j for j in self.jobs.values() if j.parent_task_id == recovery["taskId"]), None)
+            if previous:
+                return previous
         if any(j.status in {"queued", "running"} for j in self.jobs.values()):
             return None
         while len(self.jobs) >= 8:
             self.jobs.pop(next(iter(self.jobs)))
         job = ResearchJob(request)
+        job.parent_task_id = recovery["taskId"] if recovery else None
         job.recorder = SessionRecorder(job.session_id, job.task_id)
         job.recorder.header(request.model_dump(mode="json", by_alias=True))
+        if recovery:
+            job.recorder.add("continuation", parentTaskId=recovery["taskId"], parentSessionId=recovery["sessionId"],
+                             previousModelCalls=recovery.get("modelCalls", 0), previousUsage=recovery.get("usage", {}))
+        runner = AgentRunner(job, get_research_tools(), settings, **({"recovery": recovery} if recovery else {}))
         job.recorder.start()
         job.emit("user_message", "研究任务已创建")
         self.jobs[job.task_id] = job
-        job.task = asyncio.create_task(AgentRunner(job, get_research_tools(), settings).run())
+        job.task = asyncio.create_task(runner.run())
         return job
 
     def cancel(self, job):

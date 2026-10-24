@@ -16,6 +16,7 @@ public class ResearchJobController {
     private final SessionStore sessions;
     public ResearchJobController(AgentJobClient client, SessionStore sessions) { this.client = client; this.sessions = sessions; }
     @PostMapping public ResponseEntity<JsonNode> create(@RequestBody JsonNode input) { return client.create(input); }
+    @PostMapping("/{taskId}/continue") public ResponseEntity<JsonNode> continueRun(@PathVariable UUID taskId) { return client.continueRun(taskId); }
 
     /** 先问 Python（运行中的任务在内存里）；找不到或 Python 不可用时，从会话 JSONL 还原已记录的研究。 */
     @GetMapping("/{taskId}") public ResponseEntity<JsonNode> get(@PathVariable UUID taskId) {

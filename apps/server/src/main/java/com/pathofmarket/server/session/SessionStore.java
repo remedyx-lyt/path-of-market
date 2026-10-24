@@ -34,7 +34,7 @@ import tools.jackson.databind.node.ObjectNode;
 @Component
 public class SessionStore {
     private static final Pattern UUID_PATTERN = Pattern.compile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
-    private static final Set<String> TYPES = Set.of("session", "event", "message", "context_edit", "report", "run_state");
+    private static final Set<String> TYPES = Set.of("session", "event", "message", "context_edit", "report", "run_state", "continuation", "report_draft");
 
     private final Path directory;
     private final JsonMapper mapper;

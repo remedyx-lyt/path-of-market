@@ -13,6 +13,7 @@ const vite = await createServer({ root: path.join(root, 'apps/web'), server: { m
 try {
   const { timeline } = await vite.ssrLoadModule('/src/features/research-lab/ActivityPanel.tsx')
   const { ResearchReport } = await vite.ssrLoadModule('/src/features/research-lab/ResearchReport.tsx')
+  const { ResearchPreview } = await vite.ssrLoadModule('/src/features/research-lab/ResearchPreview.tsx')
   const event = (id, type, fields = {}) => ({ id, type, message: type, parentId: null, timestamp: '', ...fields })
   const failed = timeline([
     event('s', 'model_started', { modelCall: 1, purpose: '形成研究计划' }),
@@ -45,7 +46,18 @@ try {
   const html = renderToStaticMarkup(createElement(ResearchReport, { report }))
   assert.ok(html.includes('方法计划未形成'))
   assert.ok(!html.includes('已形成计划'))
-  console.log('PASS 4 recovery UI groups: failed model, interrupted tools, recovery events, truthful plan status; no model calls')
+  const partial = renderToStaticMarkup(createElement(ResearchPreview, { report, isGenerating: false, hasError: false, onContinue() {} }))
+  assert.ok(partial.includes('从已保存进度继续'))
+  assert.ok(partial.includes('研究未完成'))
+  const completed = renderToStaticMarkup(createElement(ResearchPreview, { report: { ...report, run: { ...report.run, status: 'completed' } }, isGenerating: false, hasError: false, onContinue() {} }))
+  assert.ok(!completed.includes('从已保存进度继续'))
+  const running = renderToStaticMarkup(createElement(ResearchPreview, { report, isGenerating: true, hasError: false, onContinue() {} }))
+  assert.ok(!running.includes('从已保存进度继续'))
+  const saved = timeline([event('w', 'writing_section', { message: '正在写：第一节' }), event('f', 'model_failed', { purpose: '撰写正文' }),
+    event('saved', 'writing_section_saved', { title: '第一节' }), event('stop', 'run_partial')])
+  assert.equal(saved[0].done, true)
+  assert.equal(saved[0].failed, false)
+  console.log('PASS 8 recovery UI groups: failure diagnostics, plan status, continuation entry, saved chapters and terminal/live states; no model calls')
 } finally {
   await vite.close()
 }

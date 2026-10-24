@@ -5,6 +5,7 @@ import com.pathofmarket.server.session.SessionStore;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import tools.jackson.databind.JsonNode;
@@ -21,6 +22,14 @@ public class SessionController {
     private final SessionStore store;
 
     public SessionController(SessionStore store) { this.store = store; }
+
+    /** 仅本机研究服务读取已落盘上下文；不通过网页 /api 暴露原始会话。 */
+    @GetMapping("/internal/sessions/runs/{runId}")
+    public ResponseEntity<?> recovery(@PathVariable UUID runId) {
+        return store.sessionForRun(runId.toString()).flatMap(store::load)
+                .<ResponseEntity<?>>map(entries -> ResponseEntity.ok(Map.of("entries", entries)))
+                .orElseGet(() -> ResponseEntity.status(404).body(ApiErrorResponse.of("RESEARCH_NOT_FOUND", "会话不存在。")));
+    }
 
     @PostMapping("/internal/sessions/{sessionId}/entries")
     public ResponseEntity<?> append(@PathVariable String sessionId, @RequestBody JsonNode body) {

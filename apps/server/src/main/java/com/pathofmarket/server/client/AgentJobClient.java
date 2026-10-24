@@ -28,7 +28,7 @@ public class AgentJobClient {
     private static final Set<String> STATES = Set.of("queued", "running", "completed", "partial", "failed", "cancelled");
     private static final Set<String> ERRORS = Set.of("MODEL_NOT_CONFIGURED", "MODEL_CONFIG_ERROR", "MODEL_AUTH_FAILED",
             "MODEL_BALANCE_INSUFFICIENT", "MODEL_RATE_LIMITED", "MODEL_UPSTREAM_ERROR", "MODEL_TIMEOUT",
-            "MODEL_UNAVAILABLE", "MODEL_INVALID_RESPONSE", "RESEARCH_BUSY", "RESEARCH_NOT_FOUND", "RESEARCH_FAILED");
+            "MODEL_UNAVAILABLE", "MODEL_INVALID_RESPONSE", "RESEARCH_BUSY", "RESEARCH_NOT_FOUND", "RESEARCH_FAILED", "RESEARCH_NOT_RESUMABLE");
 
     public AgentJobClient(AgentProperties properties, JsonMapper mapper) {
         this.properties = properties;
@@ -40,6 +40,7 @@ public class AgentJobClient {
     public ResponseEntity<JsonNode> create(JsonNode body) { return request("POST", "", body); }
     public ResponseEntity<JsonNode> get(UUID taskId) { return request("GET", "/" + taskId, null); }
     public ResponseEntity<JsonNode> cancel(UUID taskId) { return request("DELETE", "/" + taskId, null); }
+    public ResponseEntity<JsonNode> continueRun(UUID taskId) { return request("POST", "/" + taskId + "/continue", null); }
 
     private ResponseEntity<JsonNode> request(String method, String suffix, JsonNode body) {
         URI uri = URI.create(properties.baseUrl().toString().replaceAll("/+$", "") + "/research/jobs" + suffix);
@@ -78,6 +79,7 @@ public class AgentJobClient {
             String message = switch (code) {
                 case "RESEARCH_BUSY" -> "已有研究正在运行，请等待完成或先停止该任务。";
                 case "RESEARCH_NOT_FOUND" -> "任务不存在或研究服务已重启，请重新开始。";
+                case "RESEARCH_NOT_RESUMABLE" -> "此任务暂时无法接续，请检查原任务状态、模型配置与会话记录。";
                 case "MODEL_NOT_CONFIGURED" -> "请在根目录 .env 中填写模型密钥并保存。";
                 case "MODEL_CONFIG_ERROR" -> "模型配置无效，请检查本地配置。";
                 default -> "研究任务暂时无法执行，请检查模型账户或稍后重试。";
@@ -85,7 +87,9 @@ public class AgentJobClient {
             throw failure(HttpStatus.valueOf(status), code, message);
         }
         validateJob(result);
-        if (!suffix.isEmpty() && !suffix.equals("/" + result.path("taskId").asString(""))) throw invalid();
+        if (suffix.endsWith("/continue")) {
+            if (!suffix.equals("/" + result.path("parentTaskId").asString("") + "/continue")) throw invalid();
+        } else if (!suffix.isEmpty() && !suffix.equals("/" + result.path("taskId").asString(""))) throw invalid();
         return ResponseEntity.status(status).body(result);
     }
 

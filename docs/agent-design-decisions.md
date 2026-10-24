@@ -146,3 +146,6 @@ M1-3 Runner 已区分发现、下载/解析、原文返回与 `processedPages` /
 PDF 渲染按 [pypdfium2 官方 API](https://pypdfium2.readthedocs.io/en/stable/python_api.html) 的渲染/`to_pil` 与非线程安全说明，放在单独可终止的进程里；沿用 PNG 大小、尺寸、页码与缓存校验，消除 Poppler 对服务 PATH 的依赖。图片渲染、模型视觉处理、财务列序语义核验仍是不同层次。
 
 JSONL 已实现主循环消息/事件/报告保存与重启查看；仍没有重启后自动接续、分支上下文恢复或所有辅助模型调用的完整原始消息保存。SessionStore 的去重集合只在写盘成功后更新；校验失败/IO 失败不能把未写入的条目标成已保存。
+# 2026-10-24 补充：调用预算与接续
+
+依据 [Pi session-format](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/session-format.md) 当前父链、[LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence) 的执行状态检查点，补充 Python 原子执行检查点与旧 JSONL 迁移恢复。Java 继续保存追加会话；新运行通过 continuation 条目关联旧运行，旧结果不改。取证预算与写作预留分开；本地回查不消耗模型调用额度。随后按用户要求接入 F17 大纲、逐节校验保存、摘要；成功章节不因后续失败作废，report_draft也逐条落盘。摘要只接收完整正文，避免与取证历史叠加超限；账户类错误不无限重试。代码、边界与验证见 [调用预算与接续](budget-and-continuation.md)。M2-5 上下文摘要压缩仍待做，分节写作未额外收费重生成报告验收。

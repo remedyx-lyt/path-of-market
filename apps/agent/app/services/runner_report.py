@@ -6,7 +6,7 @@ validate_content 是确定性的程序核查（来源/页码/覆盖/图表 ID/�
 import json
 import re
 
-from app.core.agent_prompts import REPORT_RULES, REVIEW_SYSTEM, TABLE_RULES
+from app.core.agent_prompts import REVIEW_SYSTEM, TABLE_RULES
 from app.core.config import ModelServiceError
 from app.schemas.agent import AgentContent, Citation, SectionTable
 from app.services.model_json import escape_inner_quotes
@@ -72,6 +72,21 @@ def normalize_table(table, index, fixes):
     if isinstance(table.get("chartColumns"), list) and len(table["chartColumns"]) > 4:
         fixes.append(f"第{index + 1}节表格「{title}」画图列截至4列（原{len(table['chartColumns'])}列）")
         table["chartColumns"] = table["chartColumns"][:4]
+    requested = table.get("chartColumns", [])
+    mapped = []
+    for column in requested if isinstance(requested, list) else []:
+        if isinstance(column, str) and column.strip().isdigit():
+            column = int(column.strip())
+        elif isinstance(column, str):
+            hits = [i for i, name in enumerate(table["columns"]) if name == column.strip()]
+            column = hits[0] if len(hits) == 1 else None
+        if type(column) is int and 0 <= column < len(table["columns"]) and column not in mapped:
+            mapped.append(column)
+    if mapped != requested or table.get("chart", "none") != "none" and not mapped:
+        fixes.append(f"第{index + 1}节表格「{title}」修正画图列；无法确定的图取消，保留数据表")
+        table["chartColumns"] = mapped
+        if not mapped:
+            table["chart"] = "none"
     for row in rows:
         pages = row.pop("pages", None)  # 真实运行中模型把来源写成页码列表：第一页作 page，其余并入 alsoFrom
         if isinstance(pages, list) and pages and row.get("page") is None:
@@ -512,35 +527,11 @@ class ReportMixin:
 
         return on_text
 
-    async def compose(self):
-        self.enter_phase("writing", "阶段：撰写报告正文")
-        self.job.emit("report_drafting", "根据已有证据和所选方法撰写图文报告")
-        # 保持与研究循环相同的系统提示和历史前缀，DeepSeek 前缀缓存可命中；写作规则作为最后一条用户消息追加。
-        messages = self.context()
-        messages.append(
-            {
-                "role": "user",
-                "content": REPORT_RULES
-                + "\n\n"
-                + self.omen_writing_instruction()
-                + "\n取证阶段已结束。现在按完整报告JSON格式写作，自主选择有用的实际图表ID与有来源的定性图；不要返回ready。",
-            }
-        )
-        try:
-            return await self.model(
-                messages, tool_specs=self.declarations(), report=True, write_only=True, on_text=self.text_watcher("heading", "writing_section", "正在写")
-            )
-        except ModelServiceError as error:
-            if error.code not in {"MODEL_UPSTREAM_ERROR", "MODEL_INVALID_RESPONSE"}:
-                raise
-            # 供应商若不接受“工具定义 + 禁止调用 + JSON”的组合，退回旧方式（不带工具），只是少了缓存命中。
-            self.job.emit("report_drafting_fallback", "写作请求改用不带工具定义的方式重试")
-            return await self.model(messages, report=True)
-
     def report(self, content=None, reason="research_completed"):
         partial = reason != "research_completed"
         if content is None:
-            sections = [
+            saved_sections = (self.writing_state or {}).get("sections", [])
+            sections = list(saved_sections) + [
                 {
                     "heading": "本次完成的工作",
                     "content": f"执行 {self.steps} 轮研究动作，模型调用 {self.job.model_calls} 次。请结合来源与阅读覆盖查看已完成范围。",
@@ -563,7 +554,7 @@ class ReportMixin:
                     )
             content = {
                 "title": self.job.request.target + "研究（未完成）",
-                "summary": "研究已停止，以下仅保留实际完成范围与资料。",
+                "summary": f"研究已停止，已保存{len(saved_sections)}节正文；可从未完成部分继续。以下仅保留实际完成范围与资料。",
                 "sections": sections,
             }
         else:

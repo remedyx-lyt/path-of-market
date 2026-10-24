@@ -90,6 +90,7 @@ def entries_for(session, run, *, finished=True):
               "runId": run, "request": {"target": "中际旭创", "question": "研究经营变化"}}
     add("event", data={"id": "e1", "parentId": None, "type": "phase_changed", "phase": "research", "message": "阶段：取证", "timestamp": "t"})
     add("message", message={"role": "assistant", "content": "{\"ready\":true}"})
+    add("report_draft", writingState={"outline": {"title": "分节草稿"}, "sections": [], "metadata": None})
     add("event", data={"id": "e2", "parentId": "e1", "type": "model_finished", "message": "撰写正文完成", "timestamp": "t", "purpose": "撰写正文"})
     if finished:
         add("report", reportId=run, reportVersion=1, report={"mode": "agent", "title": "测试报告", "sections": [], "coverage": [], "sources": []})
@@ -131,6 +132,10 @@ if __name__ == "__main__":
         file = FOLDER / "store" / f"{session}.jsonl"
         lines = file.read_text(encoding="utf-8").splitlines()
         check("JSONL 一行一条且首行是会话头", len(lines) == len(entries) and json.loads(lines[0])["type"] == "session")
+        status, body = request(base, f"/internal/sessions/runs/{run}")
+        check("接续服务可读取原会话完整上下文", status == 200 and body["entries"] == entries, body)
+        status, _ = request(base, f"/internal/sessions/runs/{uuid.uuid4()}")
+        check("接续读取未知任务返回404", status == 404)
 
         # 一批中后面的条目无效时，之前的合法条目不能提前占用“已落盘 id”，否则重试会被错误去重，整批丢失。
         retry_session, retry_run = str(uuid.uuid4()), str(uuid.uuid4())
