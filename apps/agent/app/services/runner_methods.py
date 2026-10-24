@@ -10,10 +10,11 @@
 import json
 
 from app.core.agent_prompts import METHOD_SYSTEM
+from app.core.config import ModelServiceError
 from app.core.omens import selected_omens
 from app.core.research_skills import load_method_bundle
 from app.schemas.agent import MethodPlan
-from app.services.model_json import DerivedCache, ask_json, stable_key
+from app.services.model_json import DerivedCache, ask_json, stable_key, validation_problems
 
 
 class MethodMixin:
@@ -43,13 +44,21 @@ class MethodMixin:
             "availableTools": [s["function"]["name"] for s in self.declarations()],
             "omenSpecs": [o.brief() for o in omens],
             "task": self.method_task(),
+            "outputSchema": MethodPlan.model_json_schema(by_alias=True),
         }
         messages = [{"role": "system", "content": METHOD_SYSTEM}, {"role": "user", "content": json.dumps(body, ensure_ascii=False)}]
 
         def parse(content):
             plan = MethodPlan.model_validate_json(content) if isinstance(content, str) else MethodPlan.model_validate(content)
-            if any(c.method_reference not in paths for c in plan.checks):
-                raise ValueError("methodReference 必须是实际提供的参考文件路径")
+            for check in plan.checks:
+                # 短路径仅在唯一对应已提供文件时展开，绝不接受未加载的方法或模糊猜测。
+                if check.method_reference not in paths:
+                    candidates = [p for p in paths if p.endswith("/" + check.method_reference)]
+                    if len(candidates) != 1:
+                        raise ValueError("methodReference 必须唯一对应实际提供的参考文件路径")
+                    check.method_reference = candidates[0]
+                if check.omen is not None and check.omen not in {o.id for o in omens}:
+                    raise ValueError("omen 必须是本次选择的预兆 ID")
             for omen in omens:
                 if sum(c.omen == omen.id for c in plan.checks) < 2:
                     raise ValueError(f"{omen.name} 需要至少2项标记 omen={omen.id} 的专属检查")
@@ -66,16 +75,28 @@ class MethodMixin:
             }
         )
         plan, origin = cache.load(key, parse)
-        status = "planned"
+        status, diagnostics = "planned", []
         if plan is None:
             repair = lambda error: (
                 "请修正为指定JSON结构：checks有3至16项，methodReference须是实际提供的文件路径；"
-                "每个所选预兆至少2项带 omen 字段的专属检查。问题：" + str(error)[:500]
+                "每个所选预兆至少2项带 omen 字段的专属检查。问题：" + "；".join(validation_problems(error))
             )
+            def invalid(message, error, attempt):
+                problems = validation_problems(error)
+                diagnostics.append({"attempt": attempt + 1, "problems": problems})
+                self.job.emit(
+                    "methods_plan_invalid", "方法计划需修正：" + "；".join(problems), attempt=attempt + 1, problems=problems,
+                )
+
             try:
-                plan, _ = await ask_json(self.model, messages, parse, repair)
+                plan, _ = await ask_json(self.model, messages, parse, repair, on_invalid=invalid)
                 cache.save(key, plan.model_dump(by_alias=True), runId=self.job.task_id)
             except ValueError:
+                plan, status = None, "plan_failed"
+            except ModelServiceError as error:
+                if error.code not in {"MODEL_INVALID_RESPONSE", "MODEL_TIMEOUT", "MODEL_UPSTREAM_ERROR", "MODEL_UNAVAILABLE"}:
+                    raise
+                diagnostics.append({"errorCode": error.code, "finishReason": getattr(error, "finish_reason", None)})
                 plan, status = None, "plan_failed"
         meta = [{k: v for k, v in r.items() if k != "content"} for r in references]
         self.method_usage = {
@@ -86,6 +107,7 @@ class MethodMixin:
             "planCacheReused": origin is not None,
             "originRunId": origin or self.job.task_id,
             "onDemandReads": [],
+            "diagnostics": diagnostics,
         }
         if plan is None:
             self.job.emit("methods_plan_failed", "方法计划未通过格式校验；继续用已加载的基础研究方法，报告中会注明。")

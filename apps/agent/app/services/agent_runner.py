@@ -240,10 +240,10 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
         self.job.model_calls += 1
         purpose = self.model_purpose(tool_specs=tool_specs, reading=reading, visual=visual, write_only=write_only)
         started = time.monotonic()
-        self.job.emit("model_started", purpose, modelCall=self.job.model_calls, purpose=purpose)
         # 多预兆报告允许更长：每个预兆追加输出预算，不为篇幅牺牲预兆分析。
         report_tokens = self.limits.report_tokens + 2500 * len(self.job.request.omens)
-        output_tokens = min(1800, self.settings.max_tokens) if reading else report_tokens if report else 6500
+        output_tokens = self.settings.reading_max_tokens if reading else report_tokens if report else 6500
+        self.job.emit("model_started", purpose, modelCall=self.job.model_calls, purpose=purpose, outputTokenLimit=output_tokens)
         # 累计预算以供应商实际用量记账，下一调用前检查；单次也有明确输出/时间上限。
         # 写作/复核输出整篇报告，使用单独的等待上限；研究轮次仍用较短上限。
         settings = replace(self.settings, timeout_seconds=self.settings.report_timeout_seconds) if report else self.settings
@@ -253,7 +253,15 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
                 options["on_text"] = on_text
             message, usage = await self.completion(settings, messages, tools=tool_specs, max_tokens=output_tokens, **options)
         except ModelServiceError as error:
-            self.record_usage(getattr(error, "usage", {}))
+            usage = getattr(error, "usage", {})
+            self.record_usage(usage)
+            reason = getattr(error, "finish_reason", None)
+            detail = "输出达到上限" if reason == "length" else error.message
+            self.job.emit(
+                "model_failed", f"{purpose}未完成：{detail}", modelCall=self.job.model_calls, purpose=purpose,
+                errorCode=error.code, finishReason=reason, usage=usage, outputTokenLimit=output_tokens,
+                durationMs=round((time.monotonic() - started) * 1000),
+            )
             raise
         self.record_usage(usage)
         self.job.emit(
@@ -476,8 +484,12 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
             record["arguments"] = arguments
             result = {"status": "completed", "data": await self.dispatch(name, arguments)}
             record["status"] = "completed"
-        except (ValueError, ToolError) as error:
-            code = error.code if isinstance(error, ToolError) else "INVALID_TOOL_ARGUMENTS"
+        except (ValueError, ToolError, ModelServiceError) as error:
+            if isinstance(error, ModelServiceError) and error.code not in {
+                "MODEL_INVALID_RESPONSE", "MODEL_TIMEOUT", "MODEL_UNAVAILABLE", "MODEL_UPSTREAM_ERROR"
+            }:
+                raise
+            code = error.code if isinstance(error, (ToolError, ModelServiceError)) else "INVALID_TOOL_ARGUMENTS"
             details = error.details if isinstance(error, ToolError) else {}
             if isinstance(error, ValidationError):
                 # 告诉模型哪里不合规（字段与规则，不回显输入），避免同一错误参数反复重试。
@@ -486,7 +498,7 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
                 "status": "failed",
                 "error": {
                     "code": code,
-                    "message": error.message if isinstance(error, ToolError) else "参数未通过工具校验。",
+                    "message": error.message if isinstance(error, (ToolError, ModelServiceError)) else "参数未通过工具校验。",
                     "details": details,
                 },
             }

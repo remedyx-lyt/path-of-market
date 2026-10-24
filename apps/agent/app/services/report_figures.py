@@ -60,7 +60,7 @@ def locate_operating_pages(pages):
     return found[:6]
 
 
-NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 
 
 def number_tokens(text):

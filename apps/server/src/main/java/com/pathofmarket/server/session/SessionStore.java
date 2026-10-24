@@ -64,6 +64,7 @@ public class SessionStore {
         Path file = file(sessionId);
         synchronized (locks.computeIfAbsent(sessionId, key -> new Object())) {
             Set<String> written = writtenIds.computeIfAbsent(sessionId, key -> readIds(file));
+            Set<String> staged = new HashSet<>(written);
             boolean empty = written.isEmpty();
             StringBuilder lines = new StringBuilder();
             int count = 0;
@@ -79,13 +80,24 @@ public class SessionStore {
                 if ("session".equals(type) && !sessionId.equals(id)) {
                     throw new IllegalArgumentException("会话头 id 与会话不一致");
                 }
-                if (!written.add(id)) continue;
+                if (!staged.add(id)) continue;
                 lines.append(mapper.writeValueAsString(entry)).append('\n');
-                String runId = entry.path("runId").asString("");
-                if (!runId.isEmpty()) sessionByRun.put(runId, sessionId);
                 count++;
             }
-            if (count > 0) write(file, lines.toString());
+            if (count > 0) {
+                try {
+                    write(file, lines.toString());
+                } catch (RuntimeException error) {
+                    // IO 可能只写完部分行；重试时从磁盘重建去重集合，不能把“准备写入”当成“已落盘”。
+                    writtenIds.remove(sessionId);
+                    throw error;
+                }
+                written.addAll(staged);
+                for (JsonNode entry : entries) {
+                    String runId = entry.path("runId").asString("");
+                    if (!runId.isEmpty()) sessionByRun.put(runId, sessionId);
+                }
+            }
             return count;
         }
     }

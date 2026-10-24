@@ -99,6 +99,8 @@ def entries_for(session, run, *, finished=True):
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
+    if not FOLDER.resolve().is_relative_to((ROOT / ".runtime/qa").resolve()):
+        raise SystemExit("拒绝清理测试目录外的路径")
     shutil.rmtree(FOLDER, ignore_errors=True)
     FOLDER.mkdir(parents=True)
     provider = ThreadingHTTPServer(("127.0.0.1", 0), Python)
@@ -129,6 +131,16 @@ if __name__ == "__main__":
         file = FOLDER / "store" / f"{session}.jsonl"
         lines = file.read_text(encoding="utf-8").splitlines()
         check("JSONL 一行一条且首行是会话头", len(lines) == len(entries) and json.loads(lines[0])["type"] == "session")
+
+        # 一批中后面的条目无效时，之前的合法条目不能提前占用“已落盘 id”，否则重试会被错误去重，整批丢失。
+        retry_session, retry_run = str(uuid.uuid4()), str(uuid.uuid4())
+        retry_entries = entries_for(retry_session, retry_run)
+        status, _ = request(base, f"/internal/sessions/{retry_session}/entries", "POST", {"entries": retry_entries[:2] + [{"id": "bad", "type": "invalid"}]})
+        check("含无效条目的整批拒绝", status == 400)
+        status, body = request(base, f"/internal/sessions/{retry_session}/entries", "POST", {"entries": retry_entries})
+        restored = (FOLDER / "store" / f"{retry_session}.jsonl").read_text(encoding="utf-8").splitlines()
+        check("拒绝后的合法重试不丢行", status == 200 and body["written"] == len(retry_entries)
+              and len(restored) == len(retry_entries) and json.loads(restored[0])["type"] == "session", body)
 
         status, snap = request(base, f"/api/research/jobs/{run}")
         check("Python 无此任务时从 JSONL 还原快照", status == 200 and snap["status"] == "completed" and snap["report"]["title"] == "测试报告"

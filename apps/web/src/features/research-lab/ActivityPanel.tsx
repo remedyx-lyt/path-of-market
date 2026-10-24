@@ -14,20 +14,21 @@ const PHASES = [
 const NOTES = new Set(['current_period_lookup', 'skill_read', 'data_extracted', 'visual_gap', 'context_wrapup', 'report_validation_failed',
   'report_normalized', 'figure_duplicates_removed', 'unknown_figures_removed', 'required_figures_placed', 'tables_dropped',
   'review_discarded', 'report_drafting_fallback', 'methods_plan_failed', 'run_partial', 'run_failed', 'run_cancelled'])
+for (const type of ['methods_plan_invalid', 'reading_note_invalid', 'reading_batch_split', 'reading_batch_retry', 'reading_batch_failed']) NOTES.add(type)
 
 type Item =
   | { kind: 'phase'; id: string; text: string }
   | { kind: 'tool'; id: string; label: string; summary: string; status: string; result?: string; durationMs?: number; progress?: string }
-  | { kind: 'model'; id: string; text: string; durationMs?: number; tokens?: number; running: boolean }
+  | { kind: 'model'; id: string; text: string; durationMs?: number; tokens?: number; running: boolean; failed?: boolean }
   | { kind: 'decision' | 'note'; id: string; text: string; warn?: boolean }
-  | { kind: 'section'; id: string; text: string; done: boolean }
+  | { kind: 'section'; id: string; text: string; done: boolean; failed?: boolean }
 
 function seconds(ms?: number) {
   return ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
 }
 
 /** 把事件序列整理成时间线：工具开始/结束合并成一行；模型调用合并；写作阶段逐节列出。 */
-function timeline(events: JobEvent[]): Item[] {
+export function timeline(events: JobEvent[]): Item[] {
   const items: Item[] = []
   const tools = new Map<string, Extract<Item, { kind: 'tool' }>>()
   const models = new Map<number, Extract<Item, { kind: 'model' }>>()
@@ -51,6 +52,16 @@ function timeline(events: JobEvent[]): Item[] {
       models.set(e.modelCall, item); items.push(item)
     } else if (e.type === 'model_finished' && e.modelCall != null && models.has(e.modelCall)) {
       Object.assign(models.get(e.modelCall)!, { running: false, durationMs: e.durationMs, tokens: e.usage?.total_tokens })
+    } else if (e.type === 'model_failed') {
+      if (lastSection && (e.purpose === '撰写正文' || e.purpose === '整理数据表')) lastSection.failed = true
+      if (e.modelCall != null && models.has(e.modelCall)) {
+        Object.assign(models.get(e.modelCall)!, { running: false, failed: true, text: e.message, durationMs: e.durationMs, tokens: e.usage?.completion_tokens })
+      } else items.push({ kind: 'note', id: e.id, text: e.message, warn: true })
+    } else if (e.type === 'run_failed' || e.type === 'run_cancelled' || e.type === 'run_partial') {
+      if (lastSection) lastSection.failed = true
+      for (const tool of tools.values()) if (tool.status === 'running') Object.assign(tool, { status: 'interrupted', result: '任务已停止，此动作未完成' })
+      for (const model of models.values()) if (model.running) Object.assign(model, { running: false, failed: true, text: model.text + '（未完成）' })
+      items.push({ kind: 'note', id: e.id, text: e.message, warn: true })
     } else if (e.type === 'assistant_message') {
       items.push({ kind: 'decision', id: e.id, text: e.message })
     } else if (e.type === 'writing_section' || e.type === 'table_section') {
@@ -93,11 +104,11 @@ export function ActivityPanel({ job, live }: { job: ResearchJob; live: boolean }
           <small>{item.status === 'running' ? item.progress ?? '进行中…' : item.result}{item.durationMs != null ? ` · ${seconds(item.durationMs)}` : ''}</small></div>
       </li>
       if (item.kind === 'model') return <li key={item.id} className={`activity-model${item.running ? ' is-running' : ''}`}>
-        <span className="activity-mark" aria-hidden="true">{item.running ? '◌' : '✓'}</span>
+        <span className="activity-mark" aria-hidden="true">{item.running ? '◌' : item.failed ? '✕' : '✓'}</span>
         <div><strong>模型</strong> {item.text}<small>{item.running ? '进行中…' : [seconds(item.durationMs), item.tokens ? `${item.tokens.toLocaleString()} tokens` : ''].filter(Boolean).join(' · ')}</small></div>
       </li>
-      if (item.kind === 'section') return <li key={item.id} className={`activity-section${item.done ? '' : ' is-running'}`}>
-        <span className="activity-mark" aria-hidden="true">{item.done ? '✓' : '✎'}</span><div>{item.done ? item.text.replace(/^正在写/, '已写').replace(/^正在整理表/, '已整理表') : item.text}</div>
+      if (item.kind === 'section') return <li key={item.id} className={`activity-section${item.done || item.failed ? '' : ' is-running'}`}>
+        <span className="activity-mark" aria-hidden="true">{item.failed ? '✕' : item.done ? '✓' : '✎'}</span><div>{item.failed ? `${item.text}（本次输出未完成）` : item.done ? item.text.replace(/^正在写/, '已写').replace(/^正在整理表/, '已整理表') : item.text}</div>
       </li>
       return <li key={item.id} className={`activity-${item.kind}${item.kind === 'note' && item.warn ? ' is-warn' : ''}`}><div>{item.text}</div></li>
     })}</ol>

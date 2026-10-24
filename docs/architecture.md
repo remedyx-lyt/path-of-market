@@ -1,5 +1,7 @@
 # 架构说明
 
+> 当前实现状态以 [current-state.md](current-state.md) 为准：活动流与 JSONL 保存已实现；2026-10-24 稳定性修复见 [审查记录](reliability-review-2026-10-24.md)。文中 M0/M1 小节保留阶段历史，不作为下一步指令。
+
 ## 项目定位
 
 Path of Market（市场之路）是一个包含研究 Agent 的个人财经研究工作台。产品负责组织资料、研究记录和交互；研究 Agent 根据用户目标选择工具、读取证据，并决定是否继续调查。它不替用户做投资决策。
@@ -80,7 +82,7 @@ Agent 核心机制先核对成熟开源实现或官方文档，依据与状态�
 
 ## M0-1：已完成的 Python 服务
 
-状态：2026-10-13 已完成并通过实际 HTTP 检查。接口、启动方法和验证结果见 `first-step.md`。后续 M0-6、M1-1 至 M1-3 均已完成，当前下一项为 M1-4。
+状态：2026-10-13 已完成并通过实际 HTTP 检查。接口、启动方法和验证结果见 `first-step.md`。后续 M0-6、M1-1 至 M1-3 均已完成，这是 M0-1 的历史记录；当前下一项见 current-state.md。
 
 第一步只启动 Python 服务：
 
@@ -119,7 +121,7 @@ M0-4 只管理草稿和预览；后续 M0-5 已在同一页面接入 Java API。
 
 网页展示实际返回的标题、摘要和全部章节。字段校验、服务不可用、超时和异常结果有明确处理，支持限制重复提交、取消等待和忽略过期响应。报告明确标注演示，真实来源与工具记录为空。
 
-M0 功能闭环和统一运行入口已完成；M1-1 至 M1-3 也已完成，下一项为 M1-4。历史网页接入详见 `fifth-step.md`，当前研究界面见 `m1-3-agent.md`，整体运行见 `sixth-step.md`。
+M0 功能闭环和统一运行入口已完成；M1-1 至 M1-3 也已完成（历史状态，当前下一项见 current-state.md）。历史网页接入详见 `fifth-step.md`，当前研究界面见 `m1-3-agent.md`，整体运行见 `sixth-step.md`。
 
 ## M1-1：已完成的模型接入与研究状态
 
@@ -139,7 +141,7 @@ Python `services/agent_runner.py` 组装任务、规则、工具和前序结果�
 
 `POST /api/research/jobs` 经 Java 对应 Python `/research/jobs`，立即返回任务 ID；GET 查询状态与结果，DELETE 取消。Java `AgentJobClient` 对短请求、完整正文等待和响应结构设边界。React `ResearchWorkspace` 轮询并恢复进程内任务，`ResearchReport` 与 `MarketChart` 展示引用、覆盖、工具、真实曲线和指标表。浏览器不直接请求 Python 或模型账户。
 
-目前任务/事件只在 Python 进程内，最多保留八个任务、同时运行一个。`id/parentId` 预留未来追加/分支，但没有 JSONL 文件、完整会话重载、分支 UI 或自动上下文摘要。阅读缓存是派生资料，不能替代 SessionStore。三份中际旭创 PDF 共 649 页文字、486 个交易日实际案例与检查见 `m1-3-agent.md`。
+M1-3 阶段任务/事件只在 Python 进程内，最多保留八个任务、同时运行一个。`id/parentId` 预留未来追加/分支，但没有 JSONL 文件、完整会话重载、分支 UI 或自动上下文摘要。阅读缓存是派生资料，不能替代 SessionStore。三份中际旭创 PDF 共 649 页文字、486 个交易日实际案例与检查见 `m1-3-agent.md`。
 
 ## M0：前端与两个后端的最小闭环（历史验收）
 

@@ -8,8 +8,9 @@ import asyncio
 import json
 
 from app.core.agent_prompts import LEGACY_READ_SYSTEM, READ_SYSTEM
+from app.core.config import ModelServiceError
 from app.schemas.agent import AgentReadArguments, ReadingNote
-from app.services.model_json import DerivedCache, ask_json, stable_key
+from app.services.model_json import DerivedCache, ask_json, stable_key, validation_problems
 from app.services.runtime import now
 from app.tools.contracts import ToolError
 
@@ -98,18 +99,59 @@ class ReadingMixin:
         cursor = self.coverage[identifier].get("nextCursor", {"startPage": 1, "offset": 0})
         self.notes.setdefault(identifier, [])
         cache = DerivedCache(self.tools.store.root / "reading-notes", "note")
+        # 缩批只重读失败游标，成功范围不回退；沿用缩小后的批量，避免下一批再次撞上同一上限。
+        max_pages, max_characters, splits, transient_retries = 20, self.limits.read_characters, 0, 0
         while cursor is not None:
             self.check_budget()
             batch = await self.raw_tool(
-                "read_document_batch", {"documentId": identifier, **cursor, "maxPages": 20, "maxCharacters": self.limits.read_characters}
+                "read_document_batch", {"documentId": identifier, **cursor, "maxPages": max_pages, "maxCharacters": max_characters}
             )
             progress = self.coverage[identifier]
+            progress["nextCursor"] = cursor
             progress["returnedCharacters"] += sum(len(p["text"]) for p in batch["pages"])
             first, last = batch["pages"][0]["page"], batch["pages"][-1]["page"]
             self.job.emit(
                 "reading_batch", f"{metadata['title']}：阅读第 {first}–{last} 页", sourceId=identifier, firstPage=first, lastPage=last
             )
-            note = await self.batch_note(identifier, metadata, batch, cursor, file_sha256, cache)
+            try:
+                note = await self.batch_note(identifier, metadata, batch, cursor, file_sha256, cache)
+            except (ModelServiceError, ToolError) as error:
+                # 密钥/余额等全局错误不能伪装成资料缺口；只隔离本批的格式、截断与临时调用故障。
+                if isinstance(error, ModelServiceError) and error.code not in {
+                    "MODEL_INVALID_RESPONSE", "MODEL_TIMEOUT", "MODEL_UNAVAILABLE", "MODEL_UPSTREAM_ERROR"
+                }:
+                    raise
+                length = isinstance(error, ModelServiceError) and getattr(error, "finish_reason", None) == "length"
+                invalid_note = isinstance(error, ToolError) and error.code == "READING_NOTE_INVALID"
+                characters = sum(len(p["text"]) for p in batch["pages"])
+                if (length or invalid_note) and characters > 1000:
+                    splits += 1
+                    max_pages = max(1, len(batch["pages"]) // 2)
+                    max_characters = max(1000, min(max_characters // 2, characters // 2))
+                    self.job.emit(
+                        "reading_batch_split", f"第 {first}–{last} 页阅读记录未完成，缩小批次后从原位置重读",
+                        sourceId=identifier, firstPage=first, lastPage=last, nextCursor=cursor,
+                        maxPages=max_pages, maxCharacters=max_characters, attempt=splits,
+                    )
+                    continue
+                if isinstance(error, ModelServiceError) and error.code in {
+                    "MODEL_TIMEOUT", "MODEL_UNAVAILABLE", "MODEL_UPSTREAM_ERROR"
+                } and transient_retries < 1:
+                    transient_retries += 1
+                    self.job.emit(
+                        "reading_batch_retry", f"第 {first}–{last} 页调用暂未完成，从同一位置重试", sourceId=identifier,
+                        errorCode=error.code, nextCursor=cursor,
+                    )
+                    await asyncio.sleep(0.5)
+                    continue
+                self.job.emit(
+                    "reading_batch_failed", f"第 {first}–{last} 页尚未读完，已保留成功范围，可接续补读",
+                    sourceId=identifier, firstPage=first, lastPage=last, errorCode=error.code, nextCursor=cursor,
+                )
+                raise ToolError(
+                    "READING_BATCH_FAILED", "本批阅读未完成，未计入已读覆盖；可用 full 从失败位置接续，不必重读已完成范围。",
+                    {"sourceId": identifier, "cause": error.code, "nextCursor": cursor, "coverage": progress.copy()},
+                ) from None
             self.notes[identifier].append(note.model_dump())
             progress["processedCharacters"] += sum(len(p["text"]) for p in batch["pages"])
             progress["processedPages"] = sorted(set(progress["processedPages"]) | {p["page"] for p in batch["pages"] if p["pageComplete"]})
@@ -118,6 +160,7 @@ class ReadingMixin:
             )
             progress["batches"] += 1
             cursor = batch["nextCursor"]
+            splits, transient_retries = 0, 0
             progress["nextCursor"] = cursor
             progress["textComplete"] = (
                 cursor is None and len(progress["processedPages"]) == progress["pageCount"] and not progress["emptyTextPages"]
@@ -175,7 +218,13 @@ class ReadingMixin:
             "只能引用这些物理页码：" + json.dumps(sorted(allowed)) + "。原文中其他引用页码不能当作本批来源。"
         )
         try:
-            note, _ = await ask_json(lambda m: self.model(m, reading=True), messages, parse, repair)
+            def invalid(message, error, attempt):
+                self.job.emit(
+                    "reading_note_invalid", "阅读记录格式需修正：" + "；".join(validation_problems(error)),
+                    sourceId=identifier, pages=sorted(allowed), attempt=attempt + 1, problems=validation_problems(error),
+                )
+
+            note, _ = await ask_json(lambda m: self.model(m, reading=True), messages, parse, repair, on_invalid=invalid)
         except ValueError:
             # 只修复一次，不能把结构失败当成全文已读；不把验证异常里的原文/堆栈塞入结果。
             raise ToolError(

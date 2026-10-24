@@ -27,7 +27,7 @@ M1-2 已实现 `ToolDefinition`、`ResearchTools` 和 Provider / DocumentStore �
 
 JSON Schema 参数、工具请求/结果配对、循环与有界上下文是广泛采用的机制。财经工具名称、错误码、日期筛选和返回字段是我们的业务约定，不声称是 Pi 或所有供应商的标准。底层 `callId` 是执行器记录 ID；M1-3 已另保留模型返回的原始 `tool_call_id`，满足 API 工具消息配对。
 
-## M1-3 已实现的循环与业务适配
+## M1-3 当时实现的循环与业务适配（历史快照；当前状态见文末与 current-state.md）
 
 - `services/agent_runner.py` 参照 Pi 的模型→工具→结果回传循环，使用 DeepSeek 原生工具消息；只执行注册的工具，拒绝截断参数。模型选择动作，程序负责边界、数据与来源。
 - 模型入口是 `find_documents`、`read_document`、`get_market_data` 三个；底层有七个工具。参考 Pi 的可组合工具集合，按财经任务组合下载/分页/查读，不照搬四个编码工具名称，也不开放任意 Shell。
@@ -134,3 +134,15 @@ M1-3 Runner 已区分发现、下载/解析、原文返回与 `processedPages` /
 新增extract_report_data逻辑工具，按已通读资料的原页文字建立可核对数值，复用现有PDF/来源边界。模型在章节中选有效图表ID或提供有引用的定性图；程序负责金额/占比计算与安全绘制。用户最新要求是不机械每节凑图，选择权保留给模型，基础数据校验和来源规则由程序保证。方法模型复核不是独立事实审计。实现与原版使用审计见 `methods-and-section-figures.md`。
 
 先查成熟实现或官方文档 → 记录采用机制与本项目适配 → 实现一个明确任务 → 用正常、缺资料、异常/恢复案例验收 → 更新本文件与任务板。尽量使用成熟库完成通用工作；业务 Provider、来源规则和金融证据口径保留为本项目职责。
+
+## 2026-10-24：阅读恢复、失败诊断与渲染环境修复
+
+本轮重新核对 [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/) 对 `max_tokens`、`finish_reason=length`、用量和截断 JSON 的说明，以及 [Pi Agent Loop](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent-loop.ts) 的 `executePreparedToolCall` / `createErrorToolResult`：工具执行错误形成工具结果，模型可以据此继续；不把每个工具异常都上升为整次 Agent 失败。上述是参考机制；批次游标、预算数值与财经覆盖规则是本项目适配。
+
+采用独立阅读输出预算，长度异常或连续格式失败时缩小失败输入并从原游标继续；只在笔记通过结构/页码校验后增加已处理覆盖。暂时连接故障同位置重试；失败仍可交回 Agent 补读；密钥/余额等全局问题和总预算仍停止。没有添加新的逻辑工具：增强 `read_document(full)` 与工具异常边界。
+
+失败事件包含结束原因、错误码、输出上限、用量与耗时，逐次格式错误只存字段/错误类型，不回显资料全文；旧记录没有的字段不补造。方法计划请求提供实际 schema，唯一短参考路径可确定性展开；不把方法计划失败写成“已形成计划”。
+
+PDF 渲染按 [pypdfium2 官方 API](https://pypdfium2.readthedocs.io/en/stable/python_api.html) 的渲染/`to_pil` 与非线程安全说明，放在单独可终止的进程里；沿用 PNG 大小、尺寸、页码与缓存校验，消除 Poppler 对服务 PATH 的依赖。图片渲染、模型视觉处理、财务列序语义核验仍是不同层次。
+
+JSONL 已实现主循环消息/事件/报告保存与重启查看；仍没有重启后自动接续、分支上下文恢复或所有辅助模型调用的完整原始消息保存。SessionStore 的去重集合只在写盘成功后更新；校验失败/IO 失败不能把未写入的条目标成已保存。

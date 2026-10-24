@@ -4,9 +4,9 @@ import base64
 from hashlib import sha256
 import os
 from pathlib import Path
-import shutil
 import struct
 import subprocess
+import sys
 from tempfile import TemporaryDirectory
 
 from app.schemas.financial import InspectArguments
@@ -21,9 +21,6 @@ def render_pages(store, arguments):
     metadata, text_pages = store.loaded(args.document_id)
     if max(args.pages) > len(text_pages):
         raise ToolError("PAGE_OUT_OF_RANGE", "视觉页码超出 PDF 范围。")
-    binary = shutil.which("pdftoppm")
-    if binary is None:
-        raise ToolError("PDF_RENDERER_UNAVAILABLE", "缺少 Poppler pdftoppm，无法渲染 PDF 原页。")
     folder = store.root / "visual-pages"
     folder.mkdir(parents=True, exist_ok=True)
     result = []
@@ -32,21 +29,15 @@ def render_pages(store, arguments):
         path = folder / key
         if not path.exists():
             with TemporaryDirectory(dir=folder) as temporary:
-                prefix = Path(temporary) / "page"
+                output = Path(temporary) / "page.png"
                 try:
                     process = subprocess.run(
                         [
-                            binary,
-                            "-f",
-                            str(page),
-                            "-l",
-                            str(page),
-                            "-singlefile",
-                            "-scale-to",
-                            "1800",
-                            "-png",
+                            sys.executable,
+                            str(Path(__file__).with_name("pdf_render_worker.py")),
                             str(store.path(args.document_id, ".pdf")),
-                            str(prefix),
+                            str(page),
+                            str(output),
                         ],
                         capture_output=True,
                         timeout=30,
@@ -56,7 +47,6 @@ def render_pages(store, arguments):
                     raise ToolError("PDF_RENDER_TIMEOUT", "PDF 原页渲染超时，本页未送入模型。") from None
                 except OSError:
                     raise ToolError("PDF_RENDER_FAILED", "PDF 原页渲染失败。") from None
-                output = prefix.with_suffix(".png")
                 if process.returncode or not output.exists() or output.stat().st_size > 4_000_000:
                     raise ToolError("PDF_RENDER_FAILED", "PDF 原页未生成大小受限的 PNG。")
                 atomic_write(path, output.read_bytes())

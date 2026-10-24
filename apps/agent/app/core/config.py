@@ -28,6 +28,8 @@ class ModelSettings:
     vision_models: tuple[str, ...] = DEFAULT_VISION_MODELS
     # 写作与复核一次输出整篇报告（多预兆时上万 token），比研究轮次慢得多；单独设等待上限，整个任务仍受总时间预算约束。
     report_timeout_seconds: float = 180
+    # 通读笔记有独立输出预算，不再受简单“模型思路”报告的 1800 token 上限影响。
+    reading_max_tokens: int = 3600
 
 
 def load_model_settings() -> ModelSettings:
@@ -72,13 +74,15 @@ def load_model_settings() -> ModelSettings:
         timeout = float(setting("LLM_TIMEOUT_SECONDS", "60"))
         report_timeout = float(setting("LLM_REPORT_TIMEOUT_SECONDS", "180"))
         max_tokens = int(setting("LLM_MAX_TOKENS", "1800"))
+        reading_tokens = int(setting("LLM_READING_MAX_TOKENS", "3600"))
         vision = tuple(v.strip() for v in setting("DEEPSEEK_VISION_MODELS", ",".join(DEFAULT_VISION_MODELS)).split(",") if v.strip())
         if not vision or any(len(v) > 120 for v in vision):
             raise ValueError
-        if not model or len(model) > 120 or not 0 < timeout <= 60 or not timeout <= report_timeout <= 600 or not 64 <= max_tokens <= 4096:
+        if (not model or len(model) > 120 or not 0 < timeout <= 60 or not timeout <= report_timeout <= 600
+                or not 64 <= max_tokens <= 4096 or not 512 <= reading_tokens <= 8192):
             raise ValueError
     except ValueError:
         raise ModelServiceError(
-            "MODEL_CONFIG_ERROR", "模型配置无效，请检查地址、模型名称、等待上限（不超过 60 秒；报告写作不超过 600 秒）和输出长度。"
+            "MODEL_CONFIG_ERROR", "模型配置无效，请检查地址、模型名称、等待上限和输出长度（阅读笔记 512–8192 token）。"
         ) from None
-    return ModelSettings(key, base_url, model, timeout, max_tokens, vision, report_timeout)
+    return ModelSettings(key, base_url, model, timeout, max_tokens, vision, report_timeout, reading_tokens)

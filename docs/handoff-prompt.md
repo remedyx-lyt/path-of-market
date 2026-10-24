@@ -72,9 +72,10 @@ M0 内部顺序：Python 演示接口 -> Java 启动与调用 -> 网页输入与
 不要接真实 LLM、资料检索、数据库、Java 或前端。
 如果用户本次只要求检查或规划，不进行业务实现。
 
-截至 2026-10-24，M0-1 至 M0-6、M1-1 至 M1-3、用户优先补充，以及代码整理/token 优化/M1-4（含真实模型验收）均已完成；下一步是 task-board.md 的用户优先补充（三）F1–F9，之后进入 M2。离线测试：python -m unittest discover -s apps/agent/tests -t apps/agent/tests。网页默认真实研究，完整PDF文字分批处理、来源/覆盖、当年报告补充、行情计算与图表已接。最新状态以financial-research-skill.md和current-state.md为准；本地.env已配置，不输出或提交密钥。
-用户优先补充已完成：16个Anthropic原版金融Skill/36个许可文件保留；当前六个逻辑工具/八个底层工具，新增extract_report_data。按任务完整处理相关原版方法并形成可调整计划，模型主动选择业务/研发/财务/定性图，分阶段写作与复核。最新案例921f4324-577a-4794-abf3-2823d0bab7c8，storage/runs/section-figures-live.json；见methods-and-section-figures.md/current-state.md。
-当前任务和父关系事件只在 Python 进程内，PDF/阅读/视觉缓存不是会话记忆。JSONL 追加、ID/parentId 与当前分支仍是 M2 会话方向。会话落盘、恢复/自动压缩、侧栏聊天、通用表图与长报告仍待做；核心更新说明用途与代码位置供用户学习。
+截至 2026-10-24，M0/M1 功能链路以及 M2-9 活动流、M2-1 会话保存已实现。当前是早期研究 Agent 原型，不把功能完成等同于稳定产品。先读 current-state.md、task-board.md、reliability-review-2026-10-24.md，再定本轮具体范围。
+本轮已修 F13 阅读独立预算/缩批接续、F14 调用失败诊断、F15 方法 schema 与诊断、F18 项目内 PDF 渲染；84 项 Python 与相关协议/会话检查通过，未重跑天齐真实付费报告。下一项 F16 表格容错与核验状态，然后 F17 按节生成恢复、多公司冷启动验收；之后再做默认问题、侧栏聊天、压缩、记忆与搜索。
+当前六个逻辑工具/八个底层工具；16 个 Anthropic 原版金融 Skill/36 个许可文件保留。新增能力优先参考成熟 Agent / 官方协议，核心变更说明用途、代码位置与实际验证范围。
+JSONL 已保存主循环消息、活动事件、报告和结束状态，可重启后查看；尚不能重启后自动接着跑，辅助子调用原始上下文也未全量保留。PDF/阅读/视觉缓存与会话记忆区分。模型密钥在本地 .env，不输出或提交；避免无必要的付费报告重生成。
 M1 的真实 Agent 任务必须单独验证模型选择工具、依据结果补查或结束；不虚构来源或工具记录。
 
 完成后运行对应检查，更新 docs/current-state.md 和 docs/task-board.md，检查 Git diff 并提交本任务改动。

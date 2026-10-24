@@ -25,7 +25,7 @@ if (-not (Test-Path -LiteralPath $taskPython)) {
 }
 
 try {
-    & $taskPython -c 'import fastapi, pydantic, uvicorn, pypdf' 2>$null
+    & $taskPython -c 'import fastapi, pydantic, uvicorn, pypdf, pypdfium2, PIL' 2>$null
     if ($LASTEXITCODE -ne 0) { $taskNeedsInstall = $true }
 }
 catch {

@@ -150,7 +150,7 @@ function MethodUsagePanel({ usage }: { usage: NonNullable<AgentResearchReport['m
       <ul>{usage.plan.checks.map((c,i) => <li key={i}><strong>{c.question}</strong>{c.omen ? <span className="section-omens"> · {OMENS.find((o) => o.value === c.omen)?.name || c.omen}</span> : null}<p>{c.evidenceNeeded}</p></li>)}</ul>
     </> : <p>本次方法计划未通过格式校验，研究按已加载的基础方法进行。</p>}
     <ul>{usage.references.map((r) => <li key={r.reference}>{skillName(r.reference)}{r.selectedBecause?.length ? `（${r.selectedBecause.join('、')}）` : ''}</li>)}</ul>
-    <p>本轮读取 {usage.references.length} 份相关原版方法{usage.planCacheReused ? '（计划复用自先前相同任务）' : ''}{extra}，{usage.reviewed ? '已结合方法计划复核报告' : '已形成计划，尚未完成报告复核'}；方法阅读与模型复核不等于独立事实审计。</p>
+    <p>本轮读取 {usage.references.length} 份相关原版方法{usage.planCacheReused ? '（计划复用自先前相同任务）' : ''}{extra}，{!usage.plan ? '方法计划未形成' : usage.reviewed ? '已结合方法计划复核报告' : '已形成计划，尚未完成报告复核'}；方法阅读与模型复核不等于独立事实审计。</p>
     {usage.plan?.unavailable.map((s,i) => <p key={i}>{s}</p>)}
   </details>
 }

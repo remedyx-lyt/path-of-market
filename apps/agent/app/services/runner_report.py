@@ -389,11 +389,12 @@ class ReportMixin:
         outcome, revised = "unchanged", content
         if not unchanged:
             try:
-                outcome, revised = "revised", self.validate_content(message)
-                if len(revised.sections) != len(content.sections):
+                candidate = self.validate_content(message)
+                if len(candidate.sections) != len(content.sections):
                     raise ValueError("复核改变了章节数量，无法对应原有数据表")
-                for before, after in zip(content.sections, revised.sections):
+                for before, after in zip(content.sections, candidate.sections):
                     after.tables = before.tables  # 数据表不经复核，原样挂回
+                outcome, revised = "revised", candidate
             except ValueError as error:
                 # 复核稿未通过程序核查：保留已通过核查的写作稿，不让一次失败的复核作废整篇报告。
                 outcome = "discarded"
@@ -574,7 +575,8 @@ class ReportMixin:
                 table["verification"] = check_table(table, self.page_text)
         limitations = [
             "PDF全文文字与局部原页视觉检查分别记录；未列出的图片/扫描页未进行视觉理解，取数校验不等于独立审计。",
-            "会话和任务目前保存在运行进程内，重启后不能恢复；持久化按 M2 实施。",
+            "已提交的会话记录可在服务重启后查看；运行中的任务尚不能在重启后自动接续。" if self.job.recorder
+            else "本次未启用会话存储，记录仅保留在运行进程内。",
         ]
         if self.market_data:
             limitations += self.market_data["limitations"]

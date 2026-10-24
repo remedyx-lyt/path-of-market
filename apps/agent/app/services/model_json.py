@@ -16,6 +16,15 @@ from app.tools.documents import write_json
 ModelCall = Callable[[list[dict]], Awaitable[dict]]
 
 
+def validation_problems(error):
+    """可持久化的校验诊断：只记录字段/错误类型，不回显模型全文或用户资料。"""
+    if hasattr(error, "errors"):
+        return [".".join(map(str, e["loc"])) + ": " + e["type"] for e in error.errors()[:8]]
+    if isinstance(error, json.JSONDecodeError):
+        return [f"JSON: {error.msg} (position {error.pos})"]
+    return [str(error)[:300]]
+
+
 def escape_inner_quotes(raw):
     """修复长篇 JSON 中正文里未转义的英文双引号（如 不是"AI需求好不好"，而是）。
 

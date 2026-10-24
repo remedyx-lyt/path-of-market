@@ -105,7 +105,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-app.ps1 
 | 缺少 python / npm.cmd / javac | 检查环境是否安装、PATH 和 JAVA_HOME；环境变量修改后重开终端 |
 | 首次下载慢或失败 | 检查网络和具体日志，必要时延长等待；失败后修复再启动 |
 | 重启电脑后页面不能用了 | 重新运行 `start-app.ps1`；这不是已部署到云端的应用 |
-| 刷新后输入和报告消失 | 当前数据只保存在页面内；研究记录持久化在 M2 实现 |
+| 刷新后输入和报告消失 | 研究记录已由 M2-1 保存；可从“最近研究”或带 task 参数的链接打开，未提交的表单输入仍在页面内 |
 
 查看最近日志：
 
