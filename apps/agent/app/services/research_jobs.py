@@ -1,10 +1,11 @@
-"""单机进程内任务；事件带父关系，持久化留给后续 Java SessionStore。"""
+"""单机进程内任务；事件带父关系。有记录器时，事件、消息与报告同时写入 Java SessionStore 的会话 JSONL（M2-1）。"""
 
 import asyncio
 from dataclasses import dataclass, field
 from uuid import uuid4
 
 from app.services.agent_runner import AgentRunner, now
+from app.services.session_recorder import SessionRecorder
 from app.tools.registry import get_research_tools
 
 
@@ -27,10 +28,10 @@ class ResearchJob:
     error: dict | None = None
     cancel_requested: bool = False
     task: object = field(default=None, repr=False)
+    recorder: object = field(default=None, repr=False)  # SessionRecorder；单元测试直接构造的任务没有
 
     def emit(self, event_type, message, **details):
-        self.events.append(
-            {
+        event = {
                 "id": str(uuid4()),
                 "parentId": self.events[-1]["id"] if self.events else None,
                 "type": event_type,
@@ -40,7 +41,9 @@ class ResearchJob:
                 "message": message,
                 **details,
             }
-        )
+        self.events.append(event)
+        if self.recorder:
+            self.recorder.add("event", data=event)
 
     def set_phase(self, phase, message):
         """切换研究阶段并记一条事件，网页据此显示阶段进度。"""
@@ -67,7 +70,8 @@ class ResearchJob:
             "coverage": self.coverage,
             "report": self.report,
             "error": self.error,
-            "storage": "process_memory",
+            "storage": "session_jsonl" if self.recorder else "process_memory",
+            "persistence": self.recorder.status() if self.recorder else None,
         }
 
 
@@ -81,6 +85,9 @@ class JobStore:
         while len(self.jobs) >= 8:
             self.jobs.pop(next(iter(self.jobs)))
         job = ResearchJob(request)
+        job.recorder = SessionRecorder(job.session_id, job.task_id)
+        job.recorder.header(request.model_dump(mode="json", by_alias=True))
+        job.recorder.start()
         job.emit("user_message", "研究任务已创建")
         self.jobs[job.task_id] = job
         job.task = asyncio.create_task(AgentRunner(job, get_research_tools(), settings).run())

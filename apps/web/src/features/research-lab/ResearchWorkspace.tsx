@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef } from 'react'
 import type { FormEvent } from 'react'
 import { generateReport, waitForAgent, cancelAgentJob, getAgentJob, ResearchApiError } from '../../api/research'
 import { ResearchPreview } from './ResearchPreview'
+import { RecentSessions } from './RecentSessions'
 import { characterCount, normalizeDraft, OMENS, validateDraft } from './researchDraft'
 import type { DraftErrors } from './researchDraft'
 import { initialWorkspaceState, workspaceReducer } from './workspaceState'
@@ -247,6 +248,7 @@ export function ResearchWorkspace() {
           {requestError && <div className="request-error" role="alert"><strong>报告未生成</strong><p>{requestError.message}</p></div>}
           <p className="form-message" role="status">{message || (isGenerating ? '正在等待研究服务返回报告。' : '可先预览任务，也可以直接生成报告。')}</p>
         </form>
+        <RecentSessions refreshKey={isGenerating ? 'running' : report} />
       </section>
       <ResearchPreview draft={preview} report={report} isGenerating={isGenerating} hasError={!!requestError} job={mode === 'agent' ? job : null} />
     </div>

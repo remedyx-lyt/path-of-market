@@ -35,6 +35,8 @@ storage/vectorstore/**
 storage/runs/
 storage/reports/
 storage/documents/
+# 研究会话 JSONL（M2-1）：含完整研究过程与报告，属于私人研究结果，不提交
+storage/sessions/
 *.db
 *.db-shm
 *.db-wal

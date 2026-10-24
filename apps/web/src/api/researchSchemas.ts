@@ -206,6 +206,11 @@ export const jobSchema = z.object({
   report: agentReportSchema.nullable(),
 })
 
+/** 研究记录列表（M2-1，来自 Java SessionStore）。 */
+export const sessionListSchema = z.object({
+  sessions: z.array(z.object({ sessionId: str, runId: str, createdAt: str, target: str, question: str, status: str, title: str.optional() })),
+})
+
 /** 错误响应：{ error: { code } } 与 FastAPI 422 的 { detail: [{ loc, type }] }。 */
 export const errorBodySchema = z.object({ error: z.object({ code: str }) })
 export const validationIssueSchema = z.object({ loc: z.array(z.unknown()), type: z.unknown().optional() })

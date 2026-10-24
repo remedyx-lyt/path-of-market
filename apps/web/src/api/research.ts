@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { DraftErrors, ReportOmen, ResearchDraft } from '../features/research-lab/researchDraft'
-import { agentReportSchema, errorBodySchema, jobSchema, mockReportSchema, modelReportSchema, validationIssueSchema } from './researchSchemas'
+import { agentReportSchema, errorBodySchema, jobSchema, mockReportSchema, modelReportSchema, sessionListSchema, validationIssueSchema } from './researchSchemas'
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -230,6 +230,19 @@ async function jobRequest(path: string, method: string, signal?: AbortSignal, bo
   }
   if (!jobSchema.safeParse(result).success) throw new ResearchApiError('任务或报告格式不正确。', 'INVALID_REPORT')
   return result as ResearchJob
+}
+
+export type SessionSummary = { sessionId: string; runId: string; createdAt: string; target: string; question: string; status: string; title?: string }
+
+/** 最近的研究记录（会话 JSONL 中保存，重启后仍在）。失败时返回空列表，不影响研究页面。 */
+export async function listSessions(signal?: AbortSignal): Promise<SessionSummary[]> {
+  try {
+    const response = await fetch('/api/research/sessions?limit=10', { signal })
+    const parsed = sessionListSchema.safeParse(await response.json())
+    return response.ok && parsed.success ? parsed.data.sessions : []
+  } catch {
+    return []
+  }
 }
 
 export async function cancelAgentJob(taskId: string) { return jobRequest(`/${taskId}`, 'DELETE') }

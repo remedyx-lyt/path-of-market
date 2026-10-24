@@ -298,3 +298,12 @@ button:disabled { opacity: 0.55; cursor: wait; }
 .activity-replay > summary { cursor: pointer; color: #555; }
 @keyframes activity-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .activity-timeline .is-running .activity-mark { animation: none; } }
+/* M2-1 最近研究：会话 JSONL 中的研究记录 */
+.recent-sessions { margin-top: 36px; padding-top: 22px; border-top: 1px solid #e5e5e5; }
+.recent-sessions h2 { font-size: 15px; margin-bottom: 12px; }
+.recent-sessions ol { list-style: none; padding: 0; margin: 0; }
+.recent-sessions li { padding: 10px 0; border-bottom: 1px solid #efefea; }
+.recent-sessions a { color: #111; font-weight: 600; font-size: 14px; text-decoration: none; }
+.recent-sessions a:hover { text-decoration: underline; }
+.recent-sessions p { color: #555; font-size: 13px; margin: 4px 0; line-height: 1.6; }
+.recent-sessions span { color: #8a8a8a; font-size: 12px; }

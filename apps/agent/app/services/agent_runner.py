@@ -30,6 +30,7 @@ from app.services.runner_omens import OmenMixin
 from app.services.runner_reading import ReadingMixin
 from app.services.runner_report import ReportMixin, compact_financial, strip_quotes
 from app.services.runtime import BudgetStop, RunLimits, now
+from app.services.session_recorder import RecordedMessages
 from app.tools.contracts import FindArguments, ToolError
 from app.tools.documents import write_json
 from app.tools.market import MarketArguments
@@ -166,6 +167,8 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
         self.completion = completion or complete_turn
         self.began = time.monotonic()
         self.messages = initial_messages(job.request)
+        if job.recorder:  # 会话持久化：每条消息（含完整工具结果）同时记入 JSONL
+            self.messages = RecordedMessages(self.messages, job.recorder)
         self.skill = load_research_skill()
         self.steps = 0
         self.invalid_finals = 0
@@ -613,3 +616,20 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
             for record in self.job.tool_calls:
                 if record["status"] == "running":
                     record.update(status="interrupted", finishedAt=now())
+            if self.job.recorder:
+                await self.persist_outcome()
+
+    async def persist_outcome(self):
+        """研究结束（完成、部分、失败或取消）：记报告与结束状态，再把剩余条目提交给会话存储。"""
+        recorder = self.job.recorder
+        if self.job.report:
+            recorder.add("report", reportId=self.job.task_id, reportVersion=1, report=self.job.report)
+        recorder.add(
+            "run_state",
+            status=self.job.status,
+            finishedAt=self.job.finished_at,
+            modelCalls=self.job.model_calls,
+            usage=self.job.usage,
+            error=self.job.error,
+        )
+        await recorder.close()
