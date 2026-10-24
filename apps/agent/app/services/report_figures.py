@@ -51,6 +51,70 @@ def locate_detail_pages(pages):
     return sorted(selected)[:12]
 
 
+OPERATING_MARKERS = (("产销量情况",), ("生产量", "销售量", "库存量"), ("产能", "产量", "销量"))
+
+
+def locate_operating_pages(pages):
+    """定位产能、产量、销量、库存量表（制造业等经营数量数据），只看正文前段，不扫附注。"""
+    found = [p["page"] for p in pages[:80] if any(all(m in compact(p["text"]) for m in group) for group in OPERATING_MARKERS)]
+    return found[:6]
+
+
+NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+def number_tokens(text):
+    """文中出现的数字（去千分位、去小数末尾的0）。PDF 文字可能在数字内断行，原文与去空白后的文本都取。"""
+    tokens = set()
+    for raw in NUMBER.findall(text) + NUMBER.findall(compact(text)):
+        try:
+            tokens.add(format(Decimal(raw.replace(",", "")).normalize(), "f"))
+        except ArithmeticError:
+            continue
+    return tokens
+
+
+def found_on_page(raw, page_values):
+    """表中数字是否出现在原页：原样出现，或原文按“元→万元/亿元”换算后、按表中小数位四舍五入相等（如 38,240,xxx,xxx 元 → 382.40 亿元）。"""
+    value = Decimal(raw.replace(",", ""))
+    places = Decimal(1).scaleb(min(value.as_tuple().exponent, 0))
+
+    def scaled_equal(p, scale):
+        try:
+            return (p / scale).quantize(places) == value
+        except ArithmeticError:  # PDF 文字里相邻数字粘连成的超长数串，换算超出精度，不可能匹配
+            return False
+
+    return value in page_values or any(scaled_equal(p, s) for p in page_values for s in (Decimal(10000), Decimal(100000000)))
+
+
+def check_table(table, page_text):
+    """逐格核对：含数字的格子，其中每个数字都须出现在本行所引原页（允许单位换算）。返回核对统计与未核对上的格子位置。
+
+    计算值（如利用率、占比、同比）在原页找不到属于正常情况，前端标为“未在原页找到”，不当作原文数据。
+    """
+    checked, unmatched = 0, []
+    for r, row in enumerate(table["rows"]):
+        if row.get("page") is None:  # 行情等无页码来源：不做原页核对，也不计入核对数
+            continue
+        cited = [(row["sourceId"], row["page"])] + [(c["sourceId"], c["page"]) for c in row.get("alsoFrom") or [] if c.get("page")]
+        page_values = {Decimal(t) for sid, page in cited for t in number_tokens(page_text(sid, page))}
+        for c, cell in enumerate(row["cells"]):
+            numbers = NUMBER.findall(cell)
+            if not numbers:
+                continue
+            checked += 1
+            if not all(found_on_page(n, page_values) for n in numbers):
+                unmatched.append([r, c])
+    return {"checkedCells": checked, "matchedCells": checked - len(unmatched), "unmatched": unmatched}
+
+
+def dominant_share(dataset):
+    """最近一期最大单项（非扣除项）收入占比；单一业务占比很高时，结构图不是必做项。"""
+    latest = dataset["rows"][-1]["items"]
+    return max((p["share"] for p in latest if not p.get("derived")), default=0)
+
+
 def verified_segments(result, document, pages):
     accepted, gaps = [], []
     expected = {"annual": "annual", "interim": "h1", "q1": "q1", "q3": "q3"}.get(document.get("reportType", "annual"))

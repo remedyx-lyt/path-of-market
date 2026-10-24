@@ -11,7 +11,7 @@ AGENT_SYSTEM = """你是财经研究工作台中的研究 Agent。只根据实�
 includeFinancials=true时，full完成后自动定位主要会计数据原页，检查列序/单位并构建财务底稿；其他重要图片或复杂表格用inspect_document_pages查看。
 遵循公司财务研究Skill，可用read_research_skill查原版方法。原版的Claude专属工具、付费服务、评级、固定篇幅或逐步确认不是本应用要求；只用已开放工具完成本次授权研究。
 综合研究至少覆盖business、performance、profitability、cashflow、balance_sheet、research、risks，合并章节可标多个topics；缺资料明确写缺口。
-正文取数对照工具的financialData和businessData；图表由程序根据底稿生成。年度/半年分开，基数为零或负值不写常规同比百分比。
+正文取数对照工具的financialData和businessData；这两类图表由程序根据底稿生成。原文里的其他数据（产能/产销、分产品毛利率、客户集中度、产能建设等）写作时可用 tables 自行做成表或图。年度/半年分开，基数为零或负值不写常规同比百分比。
 主动根据研究问题、证据和读者需要选择有用的图表，不等用户逐个指定，不机械给每节凑图或复刻固定菜单。业务结构、研发与资产质量有重要变化时不能只给财务总览画图。
 在对应章节用chartIds选择financialData.charts中的ID、businessIds选择businessData.datasets中的ID；年度与半年同一图族一起选可切换。图旁解释它支持什么判断，不重复把同图放进多个章节。
 full后自动尝试正文取数；不足时用extract_report_data读取已通读资料的指定页，或inspect_document_pages核对复杂表格。不可只停留在找到资料却未提取业务/研发等已披露数字。
@@ -31,9 +31,16 @@ REPORT_RULES = """现在进入报告写作阶段，忽略上面的ready返回格
 只输出JSON：{"title":"标题","summary":"结论与研究区间/局限","sections":[{"heading":"章节","content":"有证据的分析，保留金额单位和年份，可分段","topics":["business"],"citations":[{"sourceId":"实际ID","page":12}],"chartIds":[],"businessIds":[],"visual":null,"omens":[]}],"omenCoverage":[]}。
 2至12章，章节只用这些字段；omens 只用所选预兆ID（exalted/ancient/opportunity/abyssal_echoes）；topics只用business/performance/profitability/cashflow/balance_sheet/research/risks，可合并标记。
 选图只填实际菜单ID，不返回charts/figureSpec/图片代码。主动选有用的业务/研发/资产质量图，依据内容安排，不按每章配额；不要只选财务总览。
+表格不在本步输出：正文写完后会单独生成数据表（产能/产销、分产品毛利率、客户集中度等），正文可写“见本节数据表”。
+必做：业务有多个板块时必须展示收入结构（businessIds），单一业务占九成以上可只文字说明；资产负债部分要含负债。除此之外选哪些图由你按研究需要决定，不凑数。
 visual非空时只能{"kind":"cards或flow","title":"图题","nodes":[{"label":"节点标题","detail":"简短说明","citations":[{"sourceId":"实际ID","page":12}]}]}，节点2至6个，各有1至3条来源。
 正文解释经营变化、行情表现及二者关系与风险；事实、推断、局限分清。每个事实引用对应来源，行情page=null。
 不输出额外字段、Markdown围栏、买卖指令或保证收益；没有的证据/估值数据不补造。"""
+
+TABLE_RULES = """报告正文已写好（章节列表见下）。现在只为它补充数据表，不改正文、不调用工具。
+根据已读原文自行决定报告需要哪些数据表（每章最多3张），例如产能/产量/销量/库存、分产品或分地区收入与毛利率、客户与供应商集中度、产能建设与订单。格式{"title":"表名","unit":"单位","columns":["列名"],"labelHeader":"行名列表头（可省）","rows":[{"label":"行名","cells":["与columns等长的格子"],"sourceId":"实际ID","page":12,"alsoFrom":[{"sourceId":"其他报告ID","page":30}]}],"chart":"none或bar或line","chartColumns":[要画图的列序号],"note":"口径与计算说明"}。columns只写数据列，不含行名列。每行数字须出现在该行所引原页；一行跨多期、数字来自不同报告时用alsoFrom补齐各期来源页（程序逐格核对，允许元→万元/亿元换算，核对不上的会标出）；利用率、占比等计算值写在单独的列并在note写明算法。数据适合比较趋势或结构时设chart画图。
+必做：资料中有产能/产量/销量/库存数据时必须列表（放在业务分析相关章节）。其余表由你按研究需要决定，不凑数；定性对照（假设与证据）也可用表。
+只输出JSON：{"tables":[{"section":章节序号（从0起）,"title":...其余字段同上}]}；数字照原文抄写，正文里的英文引号要转义或改用中文引号。"""
 
 # 兼容旧引用：完整写作系统提示 = 研究系统提示 + 写作规则。实际写作阶段沿用研究系统提示，把写作规则作为最后一条消息追加，便于前缀缓存。
 REPORT_SYSTEM = AGENT_SYSTEM + "\n" + REPORT_RULES
@@ -63,7 +70,7 @@ REVIEW_SYSTEM = """核对财经研究报告的文字与程序证据是否一致�
 3) 最大回撤低点不是整个价格区间的最低价。4) 供应商后复权价格字段不是归一化指数，也不是实际股价；归一化指数从100开始另算。
 5) 不把拟议分红或不知道的复权因子说成已验证的涨跌原因。没有新闻/估值/基准数据时，市场预期、单月原因等只能明确为假设或删去。
 6) 同比增速放缓时标题不能写增长加速。7) 只处理了PDF文字，不能声称图片/扫描也全部理解。
-保留每章topics、chartIds、businessIds和visual字段；按计划检查增长驱动、分部结构、盈利/现金质量、反方证据是否落实，缺数据明确缺口。可以调整选图但不得删光有效业务/研发图，只留下财务总览。文字取数核对financialData/businessData，局部视觉检查不等于全本图片理解。引用只能保留已处理来源的有效物理页码，行情 page=null。使用中文，只输出 JSON，不输出代码围栏。
+保留每章topics、chartIds、businessIds和visual字段，不增减章节（数据表由程序按章节另行挂回，本次不输出tables）；按计划检查增长驱动、分部结构、盈利/现金质量、反方证据是否落实，缺数据明确缺口。可以调整选图但不得删光有效业务/研发图，只留下财务总览。文字取数核对financialData/businessData，局部视觉检查不等于全本图片理解。引用只能保留已处理来源的有效物理页码，行情 page=null。使用中文，只输出 JSON，不输出代码围栏。
 """
 
 

@@ -13,14 +13,39 @@ from app.core.agent_prompts import EXTRACT_SYSTEM, VISION_SYSTEM
 from app.schemas.financial import ExtractArguments, ExtractResult, InspectArguments, VisualResult, parse_extraction
 from app.services.financial_data import build_financial_data, locate_summary_pages, verified_points
 from app.services.model_json import DerivedCache, ask_json, stable_key
-from app.services.report_figures import build_business_data, locate_detail_pages, verified_segments
+from app.services.report_figures import build_business_data, locate_detail_pages, locate_operating_pages, verified_segments
 from app.services.runtime import now
 from app.tools.contracts import ToolError
 from app.tools.documents import write_json
 
 UNIT_PATTERN = re.compile(r"单位\s*[:：]\s*(?:人民币)?(亿元|万元|元)")
-# 同一页可能开始母公司报表，模型不可把它与此前合并口径混用。
-PARENT_STATEMENT = re.compile(r"2[、．.]\s*母公司资产负债表|4[、．.]\s*母公司利润表")
+# 财务报告中的报表与附注标题，用来判断一段文字属于合并口径还是母公司口径。
+STATEMENT_HEADING = re.compile(
+    r"\d+\s*[、．.]\s*(?:合并|母公司)(?:资产负债表|利润表|现金流量表|所有者权益变动表)|合并财务报表项目注释|母公司财务报表主要项目注释"
+    r"|[一二三四五六七八九十]+\s*[、．.]\s*公司基本情况"  # 报表之后的通用附注章节，回到默认（合并）口径
+)
+
+
+def consolidated_text(pages, number):
+    """只保留合并口径的文字。母公司报表常跨页：页首沿用前面最近一个标题的口径，页内遇到新标题再切换。
+
+    例：年报第92页合并资产负债表结尾之后是“2、母公司资产负债表”，第93–94页上半部分仍是母公司报表；
+    若不按跨页口径过滤，母公司的“负债合计”会被当成合并总负债。
+    """
+    parent = False
+    for entry in reversed(pages[: number - 1]):
+        hits = STATEMENT_HEADING.findall(entry["text"])
+        if hits:
+            parent = "母公司" in hits[-1]
+            break
+    text, kept, start = pages[number - 1]["text"], [], 0
+    for match in STATEMENT_HEADING.finditer(text):
+        if not parent:
+            kept.append(text[start : match.start()])
+        parent, start = "母公司" in match.group(0), match.start()
+    if not parent:
+        kept.append(text[start:])
+    return "".join(kept)
 
 
 class EvidenceMixin:
@@ -29,6 +54,27 @@ class EvidenceMixin:
 
     def business_data(self):
         return build_business_data(self.segment_points, self.financial_data(), self.business_gaps)
+
+    def document_pages(self, identifier):
+        """已下载资料的逐页文字（只读本地缓存，每份资料加载一次）；取不到时为空，相应核对视为未找到。"""
+        if identifier not in self.document_cache:
+            try:
+                self.document_cache[identifier] = self.tools.store.loaded(identifier)[1]
+            except ToolError:
+                self.document_cache[identifier] = []
+        return self.document_cache[identifier]
+
+    def page_text(self, identifier, page):
+        pages = self.document_pages(identifier)
+        return pages[page - 1]["text"] if 0 < page <= len(pages) else ""
+
+    def operating_pages(self):
+        """已通读资料中产能/产量/销量/库存表所在页：{sourceId: [页码]}。写作时这是必做内容，研究中提示模型回查。"""
+        return {
+            sid: pages
+            for sid, c in self.coverage.items()
+            if c["textComplete"] and (pages := locate_operating_pages(self.document_pages(sid)))
+        }
 
     async def extract(self, arguments, *, origin="model_tool"):
         args = ExtractArguments.model_validate(arguments)
@@ -41,7 +87,7 @@ class EvidenceMixin:
             raise ToolError("PAGE_OUT_OF_RANGE", "取数页码重复或超出资料范围。")
         payload, texts, units = [], {}, {}
         for number in args.pages:
-            text = PARENT_STATEMENT.split(pages[number - 1]["text"])[0]
+            text = consolidated_text(pages, number)
             texts[number] = text
             for prior in reversed(pages[max(0, number - 4) : number]):
                 candidate = text if prior["page"] == number else prior["text"]

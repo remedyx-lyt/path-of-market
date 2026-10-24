@@ -13,6 +13,7 @@ import asyncio
 from dataclasses import dataclass, replace
 import json
 import logging
+import re
 import time
 
 from pydantic import ValidationError
@@ -68,6 +69,19 @@ def declarations():
         {"type": "function", "function": {"name": name, "description": description, "parameters": schema.model_json_schema(by_alias=True)}}
         for name, description, schema in TOOL_SPECS
     ]
+
+
+READY = re.compile(r'\{\s*"ready"\s*:\s*true\s*\}')
+
+
+def wants_to_write(content):
+    """决策阶段表示“证据够了，可以写报告”。除标准的 {"ready":true} 外，真实运行中出现过：文字说明后附 {"ready":true}，
+    或 {"ready":true,...} 带其他字段。这些都转入写作，而不是当成一份格式错误的报告（会白白消耗一次重写机会）。"""
+    try:
+        body = json.loads(content or "")
+    except ValueError:
+        return bool(READY.search(content or ""))
+    return isinstance(body, dict) and body.get("ready") is True and "sections" not in body
 
 
 def context_characters(messages):
@@ -146,6 +160,7 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
         self.review_outcome = None
         self.context_wrapup = False  # 上下文接近上限后不再取证，直接写作
         self.wrapup_gaps = []  # 收尾写作时无法再补的证据缺口，写入报告局限
+        self.table_gaps = []  # 必做数据表未能生成的说明，写入报告局限
         self.action_counts = {}
         # 工具消息的上下文投影缓存（tool_call_id → ToolView）
         self.tool_views = {}
@@ -162,6 +177,7 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
         self.financial_points, self.financial_gaps = [], []
         self.segment_points, self.business_gaps = [], []
         self.financial_checked, self.detail_checked = set(), set()
+        self.document_cache = {}  # sourceId → 逐页文字，供表格核对与经营数据页定位
         # 方法计划（runner_methods）
         self.method_usage = None
 
@@ -340,6 +356,10 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
             if conflicts:
                 state["conflicts"] = conflicts
                 state["conflictInstruction"] = "存在来源冲突：先查看原页或补查；仍无法确认则在报告中并列说明并列入局限，不自行选值。"
+            operating = self.operating_pages()
+            if operating:
+                state["operatingDataPages"] = [{"sourceId": sid, "pages": pages} for sid, pages in operating.items()]
+                state["operatingInstruction"] = "这些页有产能/产量/销量/库存数据，报告必须用 tables 列出；写作前可用 mode=page 回查原数。"
             messages.append({"role": "user", "content": json.dumps(state, ensure_ascii=False)})
         messages.append(
             {
@@ -371,9 +391,10 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
     async def finish(self, assistant):
         """模型未调用工具：ready 则进入写作，否则视为报告；通过核查返回 True，未通过则把问题回给模型。"""
         try:
-            if json.loads(assistant.get("content") or "{}") == {"ready": True}:
+            if wants_to_write(assistant.get("content")):
                 assistant = await self.compose()
             content = self.validate_content(assistant)
+            content = await self.add_tables(content)
             content = await self.review(content)
             self.job.report = self.report(content)
             self.job.status = "completed"

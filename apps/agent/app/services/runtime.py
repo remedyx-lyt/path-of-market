@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 class RunLimits:
     max_steps: int = 18
     max_model_calls: int = 72
-    max_tokens: int = 1_200_000
+    # 累计 token 预算。上下文上限翻倍、写作分正文与数据表两步后，单次研究约 0.9–1.3M（多数为缓存命中，约 1/50 价格）。
+    max_tokens: int = 2_000_000
     max_seconds: float = 1200
     # 程序自设的单次请求文字上限（不是模型窗口；deepseek-flash 窗口 100 万 token）。2026-10-24 用户要求由 16 万翻倍。
     max_context_characters: int = 320000

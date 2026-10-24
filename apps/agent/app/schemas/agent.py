@@ -1,7 +1,7 @@
 """M1-3 异步研究与引用约定；不改变原有 mock/model 接口。"""
 
-from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated, Literal
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.schemas.research import ModelResearchRequest
 from app.tools.contracts import DocumentArguments
 
@@ -53,6 +53,38 @@ class SectionDiagram(BaseModel):
     nodes: list[DiagramNode] = Field(min_length=2, max_length=6)
 
 
+class TableRow(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, str_strip_whitespace=True)
+    label: str = Field(min_length=1, max_length=60)
+    cells: list[Annotated[str, Field(max_length=120)]] = Field(min_length=1, max_length=10)
+    source_id: str = Field(alias="sourceId", min_length=1, max_length=80, description="本行数字所在资料")
+    page: int | None = Field(default=None, ge=1, strict=True, description="本行数字所在 PDF 物理页（行情数据为 null）；程序核对数字确实出现在该页")
+    also_from: list[Citation] = Field(default_factory=list, alias="alsoFrom", max_length=4, description="一行跨多期、数字来自不同报告时补充的来源页")
+    note: str = Field(default="", max_length=200, description="本行口径或计算说明（如“计算值：产量÷产能”）")
+
+
+class SectionTable(BaseModel):
+    """模型根据已读原文自行决定的数据表（可选画成图）。程序逐格核对数字是否出现在所引原页，核对不上的格子标出。"""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, str_strip_whitespace=True)
+    title: str = Field(min_length=1, max_length=100)
+    unit: str = Field(default="", max_length=30)
+    label_header: str = Field(default="", alias="labelHeader", max_length=30, description="行名那一列的表头，如“期间”")
+    columns: list[Annotated[str, Field(min_length=1, max_length=30)]] = Field(min_length=1, max_length=10)
+    rows: list[TableRow] = Field(min_length=1, max_length=30)
+    chart: Literal["none", "bar", "line"] = "none"
+    chart_columns: list[int] = Field(default_factory=list, alias="chartColumns", max_length=4, description="画图的列（从0起）")
+    note: str = Field(default="", max_length=300)
+
+    @model_validator(mode="after")
+    def check_shape(self):
+        if any(len(row.cells) != len(self.columns) for row in self.rows):
+            raise ValueError("每行 cells 数量须与 columns 一致")
+        if any(not 0 <= i < len(self.columns) for i in self.chart_columns) or (self.chart != "none" and not self.chart_columns):
+            raise ValueError("chartColumns 须是 columns 的有效序号；画图时至少选一列")
+        return self
+
+
 class AgentSection(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     heading: str = Field(min_length=1, max_length=120, strict=True)
@@ -64,6 +96,7 @@ class AgentSection(BaseModel):
     visual: SectionDiagram | None = None
     chart_ids: list[str] = Field(default_factory=list, alias="chartIds", max_length=8)
     business_ids: list[str] = Field(default_factory=list, alias="businessIds", max_length=6)
+    tables: list[SectionTable] = Field(default_factory=list, max_length=3)
     omens: list[OmenId] = Field(default_factory=list, max_length=4, description="本章服务的预兆；每个所选预兆至少有一个明确章节。")
 
 

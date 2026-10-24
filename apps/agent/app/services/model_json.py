@@ -16,6 +16,36 @@ from app.tools.documents import write_json
 ModelCall = Callable[[list[dict]], Awaitable[dict]]
 
 
+def escape_inner_quotes(raw):
+    """修复长篇 JSON 中正文里未转义的英文双引号（如 不是"AI需求好不好"，而是）。
+
+    字符串内遇到 `"` 时看后面第一个非空白字符：是 , : } ] 或文本结束才视为字符串结束，否则视为正文里的引号并转义。
+    只在原文无法解析时使用；修复后仍须通过 schema 与程序核查。
+    """
+    out, in_string, i, n = [], False, 0, len(raw)
+    while i < n:
+        ch = raw[i]
+        if in_string and ch == "\\":
+            out.append(raw[i : i + 2])
+            i += 2
+            continue
+        if ch == '"':
+            if not in_string:
+                in_string = True
+            else:
+                j = i + 1
+                while j < n and raw[j] in " \t\r\n":
+                    j += 1
+                if j < n and raw[j] not in ",:}]":
+                    out.append('\\"')
+                    i += 1
+                    continue
+                in_string = False
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def stable_key(payload: Any) -> str:
     """对任意 JSON 结构计算稳定哈希；键排序，保证同一输入得到同一缓存文件名。"""
     return sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()

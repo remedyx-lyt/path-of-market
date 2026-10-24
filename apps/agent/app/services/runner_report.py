@@ -5,11 +5,13 @@ validate_content 是确定性的程序核查（来源/页码/覆盖/图表 ID/�
 
 import json
 
-from app.core.agent_prompts import REPORT_RULES, REVIEW_SYSTEM
+from app.core.agent_prompts import REPORT_RULES, REVIEW_SYSTEM, TABLE_RULES
 from app.core.config import ModelServiceError
-from app.schemas.agent import AgentContent
-from app.services.report_figures import plan_section_figures
+from app.schemas.agent import AgentContent, Citation, SectionTable
+from app.services.model_json import escape_inner_quotes
+from app.services.report_figures import check_table, dominant_share, plan_section_figures
 from app.services.runtime import now
+from app.tools.documents import write_json
 
 BASIC_TOPICS = {"business", "performance", "profitability", "cashflow", "balance_sheet", "research", "risks"}
 
@@ -27,6 +29,91 @@ def unique_citations(citations, limit):
     return kept[:limit]
 
 
+OPERATING_WORDS = ("产能", "产量", "销量", "库存")
+
+
+def operating_table_present(tables, located):
+    """是否已有产能/产销表：标题或列名含产能/产量/销量/库存，且引用了程序定位到的经营数据页。只引用同一页的其他表不算。"""
+    return any(
+        any(w in table.title + "".join(table.columns) for w in OPERATING_WORDS)
+        and located & {(c.source_id, c.page) for row in table.rows for c in [row, *row.also_from]}
+        for table in tables
+    )
+
+
+def normalize_table(table, index, fixes):
+    """表格的机械整理。真实验收中最常见：把行名列的表头（期间/项目）也写进 columns，列数比每行格子多 1。
+
+    能确定意图的就整理；整理后行列仍对不上的表去掉（记录说明），不让一张表拖累整篇报告重写。
+    """
+    if not isinstance(table, dict):
+        return table
+    columns, rows = table.get("columns"), table.get("rows")
+    if not (isinstance(columns, list) and isinstance(rows, list) and rows and all(isinstance(r, dict) and isinstance(r.get("cells"), list) for r in rows)):
+        return table
+    title = str(table.get("title", ""))[:20]
+    if {len(r["cells"]) for r in rows} == {len(columns) - 1} and len(columns) > 1 and not table.get("labelHeader"):
+        table["labelHeader"], table["columns"] = str(columns[0])[:30], columns[1:]
+        if isinstance(table.get("chartColumns"), list):
+            table["chartColumns"] = [c - 1 for c in table["chartColumns"] if isinstance(c, int) and c >= 1]
+            if not table["chartColumns"]:
+                table["chart"] = "none"
+        fixes.append(f"第{index + 1}节表格「{title}」把行名表头“{table['labelHeader']}”移出数据列")
+    for row in rows:
+        # 真实运行中模型常把数字直接写成数值（2376）而不是字符串，按原样转成文字，不改数值。
+        row["cells"] = [cell if isinstance(cell, str) else "" if cell is None else str(cell) for cell in row["cells"]]
+        if not isinstance(row.get("label"), str) and row.get("label") is not None:
+            row["label"] = str(row["label"])
+        for key in ("chart", "chartColumns"):  # 真实运行中模型把画图设置写进了行里
+            if key in row:
+                value = row.pop(key)
+                table.setdefault(key, value)
+    if isinstance(table.get("chartColumns"), list) and len(table["chartColumns"]) > 4:
+        fixes.append(f"第{index + 1}节表格「{title}」画图列截至4列（原{len(table['chartColumns'])}列）")
+        table["chartColumns"] = table["chartColumns"][:4]
+    for row in rows:
+        pages = row.pop("pages", None)  # 真实运行中模型把来源写成页码列表：第一页作 page，其余并入 alsoFrom
+        if isinstance(pages, list) and pages and row.get("page") is None:
+            row["page"] = pages[0]
+            row["alsoFrom"] = (row.get("alsoFrom") or []) + [{"sourceId": row.get("sourceId"), "page": p} for p in pages[1:4]]
+    coerced = [row for row in rows if isinstance(row.get("page"), str) and row["page"].strip().isdigit()]
+    for row in coerced:
+        row["page"] = int(row["page"].strip())
+    if coerced:
+        fixes.append(f"第{index + 1}节表格「{title}」页码由文字改为数字（{len(coerced)}行）")
+    if any(len(r["cells"]) != len(table["columns"]) for r in rows):
+        fixes.append(f"第{index + 1}节表格「{title}」行列数对不上，已去掉")
+        return None
+    return table
+
+
+MAX_SECTIONS = 12
+
+
+def merge_extra_sections(data, fixes):
+    """超过 12 节时把多出的章节并入第 12 节：标题保留为小标题、正文全保留，引用/图表/表格合并到 schema 上限。
+
+    真实验收中两个预兆常让报告写到 13–14 节，每次都整篇重写；合并只改变分节，不删正文。
+    """
+    sections = data.get("sections")
+    if not isinstance(sections, list) or len(sections) <= MAX_SECTIONS or not all(isinstance(s, dict) for s in sections):
+        return
+    keep, extra = sections[: MAX_SECTIONS - 1], sections[MAX_SECTIONS - 1 :]
+    merged = {
+        "heading": str(extra[0].get("heading", ""))[:120],
+        "content": "\n\n".join(f"【{s.get('heading', '')}】\n{s.get('content', '')}" for s in extra)[:10000],
+        "citations": [c for s in extra for c in s.get("citations") or []],
+        "topics": list(dict.fromkeys(t for s in extra for t in s.get("topics") or [])),
+        "omens": list(dict.fromkeys(o for s in extra for o in s.get("omens") or [])),
+        "chartIds": list(dict.fromkeys(c for s in extra for c in s.get("chartIds") or []))[:8],
+        "businessIds": list(dict.fromkeys(b for s in extra for b in s.get("businessIds") or []))[:6],
+        "tables": [t for s in extra for t in s.get("tables") or []][:3],
+        "visual": next((s.get("visual") for s in extra if s.get("visual")), None),
+    }
+    data["sections"] = keep + [merged]
+    fixes.append(f"章节超过{MAX_SECTIONS}节（{len(sections)}节），最后{len(extra)}节合并为一节，正文与小标题保留")
+
+
 def normalize_report(raw):
     """写作结果的机械格式整理：引用去重并截到 schema 上限、去掉定性图层级的多余字段、预兆自评列表截到上限。
 
@@ -40,6 +127,11 @@ def normalize_report(raw):
     if not isinstance(data, dict):
         return raw, []
     fixes = []
+    if "sections" not in data and isinstance(data.get("candidate"), dict) and "sections" in data["candidate"]:
+        # 复核时模型曾把报告包在输入里的 candidate 字段中返回。
+        data = data["candidate"]
+        fixes.append("报告外层多包了一层 candidate，已去掉")
+    merge_extra_sections(data, fixes)
     for i, section in enumerate(data.get("sections") or []):
         if not isinstance(section, dict):
             continue
@@ -54,12 +146,24 @@ def normalize_report(raw):
                 visual.pop(key)
             if extra:
                 fixes.append(f"第{i + 1}节定性图去掉多余字段 {extra}")
-            for node in visual.get("nodes") or []:
+            nodes = visual.get("nodes")
+            if isinstance(nodes, list):
+                cited = [n for n in nodes if not (isinstance(n, dict) and n.get("citations") == [])]
+                if len(cited) < len(nodes):
+                    # 定性图每个节点须有来源；没有来源的节点去掉，剩不足 2 个则不放这张图。
+                    fixes.append(f"第{i + 1}节定性图去掉 {len(nodes) - len(cited)} 个无来源节点")
+                    visual["nodes"] = nodes = cited
+                if len(nodes) < 2:
+                    section["visual"] = None
+                    fixes.append(f"第{i + 1}节定性图有效节点不足 2 个，未放入")
+            for node in (section["visual"] or {}).get("nodes") or []:
                 if isinstance(node, dict) and isinstance(node.get("citations"), list):
                     count = len(node["citations"])
                     node["citations"] = unique_citations(node["citations"], 3)
                     if len(node["citations"]) < count:
                         fixes.append(f"第{i + 1}节定性图节点引用去重/截至3条（原{count}条）")
+        if isinstance(section.get("tables"), list):
+            section["tables"] = [t for t in (normalize_table(t, i, fixes) for t in section["tables"]) if t is not None]
     for entry in data.get("omenCoverage") or []:
         if isinstance(entry, dict):
             for key in ("addressed", "missingItems"):
@@ -122,6 +226,28 @@ class ReportMixin:
         if gap not in self.wrapup_gaps:
             self.wrapup_gaps.append(gap)
 
+    def place_required_figures(self, content):
+        """必做图由程序兜底：资产负债图（含负债）、非单一业务的收入结构图。模型漏放时补到对应主题章节，不为此整篇重写。"""
+        placed = {i for s in content.sections for i in s.chart_ids + s.business_ids}
+
+        def section_for(topic, field, limit):
+            fitting = [s for s in content.sections if len(getattr(s, field)) < limit]
+            return next((s for s in fitting if topic in s.topics), fitting[0] if fitting else None)
+
+        added = []
+        balance = [c["id"] for c in self.financial_data()["charts"] if {"totalLiabilities", "liabilityRatio"} & set(c["keys"])]
+        if balance and not placed & set(balance) and (section := section_for("balance_sheet", "chart_ids", 8)):
+            section.chart_ids.append(balance[0])
+            added.append(balance[0])
+        datasets = [d for d in self.business_data()["datasets"] if dominant_share(d) < 90]
+        for dimension in dict.fromkeys(d["dimension"] for d in datasets):
+            ids = [d["id"] for d in datasets if d["dimension"] == dimension]
+            if not placed & set(ids) and (section := section_for("business", "business_ids", 6)):
+                section.business_ids.append(ids[0])
+                added.append(ids[0])
+        if added:
+            self.job.emit("required_figures_placed", "必做图表由程序补放到对应章节：" + "、".join(added), added=added)
+
     def validate_content(self, message):
         raw, fixes = normalize_report(message["content"])
         content = AgentContent.model_validate_json(raw)
@@ -160,15 +286,14 @@ class ReportMixin:
             raise ValueError("引用必须指向本次实际处理的来源和页码")
         chart_ids = {c["id"] for c in self.financial_data()["charts"]}
         business_ids = {d["id"] for d in self.business_data()["datasets"]}
-        if self.job.request.include_financials:
-            if chart_ids and not any(s.chart_ids for s in content.sections):
-                raise ValueError("已取得财务绘图数据，请主动选择支持论点的chartIds，不能全部闲置。")
-            if business_ids and not any(s.business_ids for s in content.sections):
-                raise ValueError("已取得业务收入结构，请主动选择相关businessIds；不能仅展示财务总览。")
-        used, repeated = set(), []
+        if self.job.request.include_financials and chart_ids and not any(s.chart_ids for s in content.sections):
+            raise ValueError("已取得财务绘图数据，请主动选择支持论点的chartIds，不能全部闲置。")
+        used, repeated, unknown = set(), [], []
         for section in content.sections:
-            if not set(section.chart_ids) <= chart_ids or not set(section.business_ids) <= business_ids:
-                raise ValueError("所选图表ID必须来自实际底稿。")
+            # 底稿里没有的图表 ID 由程序去掉（真实运行中出现过自拟 ID），不为此整篇重写。
+            unknown += [i for i in section.chart_ids if i not in chart_ids] + [i for i in section.business_ids if i not in business_ids]
+            section.chart_ids = [i for i in section.chart_ids if i in chart_ids]
+            section.business_ids = [i for i in section.business_ids if i in business_ids]
             # 同一图表只放一次：保留第一次出现的章节，后面章节的重复引用由程序去掉，不为这条机械规则整篇重写。
             repeated += [i for i in section.chart_ids + section.business_ids if i in used]
             section.chart_ids = [i for i in section.chart_ids if i not in used]
@@ -176,7 +301,14 @@ class ReportMixin:
             used |= set(section.chart_ids + section.business_ids)
             if section.visual and not all(self.check_citation(c) for node in section.visual.nodes for c in node.citations):
                 raise ValueError("定性图节点也须引用实际已读来源和页码。")
+            if not all(
+                self.check_citation(c) for t in section.tables for row in t.rows for c in [Citation(sourceId=row.source_id, page=row.page), *row.also_from]
+            ):
+                raise ValueError("tables 每行须引用本次实际处理的来源和页码（sourceId、page）。")
+        self.place_required_figures(content)
         self.validate_omens(content)
+        if unknown:
+            self.job.emit("unknown_figures_removed", "去掉底稿中不存在的图表 ID：" + "、".join(unknown)[:200], removed=unknown)
         if repeated:
             self.job.emit(
                 "figure_duplicates_removed", f"同一图表已放在前面章节，去掉后面 {len(repeated)} 处重复引用", removed=repeated
@@ -185,7 +317,8 @@ class ReportMixin:
 
     def review_payload(self, content):
         return {
-            "candidate": content.model_dump(by_alias=True),
+            # 数据表已由程序逐格核对，复核只看正文与图表；带上十几张表会让复核整篇重写超出输出上限。
+            "candidate": content.model_dump(by_alias=True, exclude={"sections": {"__all__": {"tables"}}}),
             "asOfDate": self.job.request.as_of_date.isoformat(),
             "discoveredDocuments": [
                 {k: d.get(k) for k in ("documentId", "title", "fiscalYear", "reportType", "publishedAt", "preferred")}
@@ -215,26 +348,125 @@ class ReportMixin:
 
     async def review(self, content):
         self.job.emit("report_review", "核对报告文字、资料范围与行情计算口径")
-        message = await self.model(
-            [
-                {"role": "system", "content": REVIEW_SYSTEM},
-                {"role": "user", "content": json.dumps(self.review_payload(content), ensure_ascii=False)},
-            ],
-            report=True,
-        )
+        try:
+            message = await self.model(
+                [
+                    {"role": "system", "content": REVIEW_SYSTEM},
+                    {"role": "user", "content": json.dumps(self.review_payload(content), ensure_ascii=False)},
+                ],
+                report=True,
+            )
+        except ModelServiceError as error:
+            if error.code not in {"MODEL_UPSTREAM_ERROR", "MODEL_INVALID_RESPONSE", "MODEL_TIMEOUT"}:
+                raise
+            # 复核调用本身失败（如输出不完整）：保留已通过核查的报告，不让复核拖垮整个任务。
+            self.job.emit("review_discarded", "复核调用未完成，保留复核前的报告：" + error.message)
+            self.review_outcome = "discarded"
+            return content
         try:
             unchanged = json.loads(message.get("content") or "{}") == {"unchanged": True}
         except ValueError:
             unchanged = False
         # 无需修改时复核只回一个标记，省去整篇报告的重复输出；有修改则重新做全部程序核查。
-        revised = content if unchanged else self.validate_content(message)
-        if self.method_usage:
+        outcome, revised = "unchanged", content
+        if not unchanged:
+            try:
+                outcome, revised = "revised", self.validate_content(message)
+                if len(revised.sections) != len(content.sections):
+                    raise ValueError("复核改变了章节数量，无法对应原有数据表")
+                for before, after in zip(content.sections, revised.sections):
+                    after.tables = before.tables  # 数据表不经复核，原样挂回
+            except ValueError as error:
+                # 复核稿未通过程序核查：保留已通过核查的写作稿，不让一次失败的复核作废整篇报告。
+                outcome = "discarded"
+                self.job.emit("review_discarded", "复核稿未通过核查，保留复核前的报告：" + str(error)[:200])
+        if self.method_usage and outcome != "discarded":
             # 计划失败时保留 plan_failed，不能因为复核过就显示为“已计划并复核”。
             self.method_usage["reviewed"] = True
             if self.method_usage["status"] != "plan_failed":
                 self.method_usage["status"] = "planned_and_reviewed"
-        self.review_outcome = "unchanged" if unchanged else "revised"
+        self.review_outcome = outcome
         return revised
+
+    def parse_tables(self, raw, section_count):
+        """解析数据表回复：每张表单独整理与校验，不合格的去掉并记下原因，不影响其他表和正文。返回 [(章节序号, SectionTable)]。"""
+        write_json(self.tools.store.root / "table-replies" / f"{self.job.task_id}-{self.job.model_calls}.json", {"reply": raw})
+        try:
+            body = json.loads(raw or "")
+        except ValueError:
+            try:
+                body = json.loads(escape_inner_quotes(raw or ""))
+            except ValueError:
+                self.job.emit("tables_dropped", "数据表回复不是有效 JSON，本次未加入表格")
+                return []
+        items = body.get("tables") if isinstance(body, dict) else None
+        accepted, reasons = [], []
+        for item in items if isinstance(items, list) else []:
+            title = str(item.get("title", ""))[:20] if isinstance(item, dict) else ""
+            section = item.pop("section", None) if isinstance(item, dict) else None
+            if isinstance(section, str) and section.strip().isdigit():
+                section = int(section)
+            if not isinstance(section, int) or not 0 <= section < section_count:
+                reasons.append(f"「{title}」章节序号无效")
+                continue
+            item = normalize_table(item, section, [])
+            if item is None:
+                reasons.append(f"「{title}」行列数对不上")
+                continue
+            try:
+                table = SectionTable.model_validate(item)
+            except ValueError as error:
+                problems = error.errors() if hasattr(error, "errors") else []
+                reasons.append(f"「{title}」" + ("；".join(".".join(map(str, e["loc"])) + " " + e["msg"] for e in problems[:2]) or str(error)[:80]))
+                continue
+            bad = [c for row in table.rows for c in [Citation(sourceId=row.source_id, page=row.page), *row.also_from] if not self.check_citation(c)]
+            if bad:
+                reasons.append(f"「{title}」来源页不是本次已读页：{bad[0].source_id} 第{bad[0].page}页")
+                continue
+            accepted.append((section, table))
+        if reasons:
+            self.job.emit("tables_dropped", f"{len(reasons)} 张表不合格已去掉：" + "；".join(reasons)[:400], reasons=reasons)
+        return accepted
+
+    async def add_tables(self, content):
+        """写作第二步：为已通过核查的正文补数据表（一次写出整篇带表格的长 JSON 容易出错，真实验收中多次因此重写）。
+
+        与研究阶段共用上下文前缀；必做的产能/产销表缺失时补要一次，仍缺则记入局限，不让表格拖累整篇报告。
+        """
+        operating = self.operating_pages()
+        located = {(sid, p) for sid, pages in operating.items() for p in pages}
+        request = TABLE_RULES + "\n章节：" + json.dumps(
+            [{"section": i, "heading": s.heading, "topics": s.topics} for i, s in enumerate(content.sections)], ensure_ascii=False
+        )
+        if operating:
+            request += "\n必做的产能/产销数据页：" + json.dumps([{"sourceId": sid, "pages": p} for sid, p in operating.items()], ensure_ascii=False)
+        tables = []
+        for attempt in range(2):
+            self.job.emit("table_drafting", "根据已读原文整理数据表" if attempt == 0 else "补做必做的产能/产销表")
+            messages = self.context() + [{"role": "user", "content": request}]
+            try:
+                message = await self.model(messages, tool_specs=self.declarations(), report=True, write_only=True)
+            except ModelServiceError as error:
+                if error.code not in {"MODEL_UPSTREAM_ERROR", "MODEL_INVALID_RESPONSE"}:
+                    raise
+                try:  # 与正文写作相同的回退：不带工具定义重试一次
+                    message = await self.model(messages, report=True)
+                except ModelServiceError as retry_error:
+                    if retry_error.code not in {"MODEL_UPSTREAM_ERROR", "MODEL_INVALID_RESPONSE"}:
+                        raise
+                    self.job.emit("tables_dropped", "数据表生成失败：" + retry_error.message)
+                    break
+            tables += self.parse_tables(message.get("content"), len(content.sections))
+            if not located or operating_table_present([t for _, t in tables], located):
+                break
+            request += "\n上一次没有列出产能/产量/销量/库存表；这次只输出这张必做表。"
+        for section, table in tables:
+            if len(content.sections[section].tables) < 3:
+                content.sections[section].tables.append(table)
+        if located and not operating_table_present([t for s in content.sections for t in s.tables], located):
+            pages = "；".join(f"{self.sources[sid]['title']}第{'、'.join(map(str, p))}页" for sid, p in operating.items())
+            self.table_gaps.append(f"资料中有产能/产量/销量/库存数据（{pages}），但本次未能生成对应数据表。")
+        return content
 
     async def compose(self):
         self.job.emit("report_drafting", "根据已有证据和所选方法撰写图文报告")
@@ -289,6 +521,11 @@ class ReportMixin:
             }
         else:
             content = content.model_dump(by_alias=True)
+            for table in (t for s in content["sections"] for t in s.get("tables", [])):
+                for row in table["rows"]:
+                    if self.sources.get(row["sourceId"], {}).get("kind") != "document":
+                        row["page"] = None  # 行情等非文件来源没有页码，避免网页显示无意义的“第1页”
+                table["verification"] = check_table(table, self.page_text)
         limitations = [
             "PDF全文文字与局部原页视觉检查分别记录；未列出的图片/扫描页未进行视觉理解，取数校验不等于独立审计。",
             "会话和任务目前保存在运行进程内，重启后不能恢复；持久化按 M2 实施。",
@@ -301,6 +538,7 @@ class ReportMixin:
         if self.context_wrapup:
             limitations.append("上下文接近上限，提前结束取证；报告只基于此前已取得的证据，未继续补查的问题见正文说明。")
             limitations += ["提前结束取证，未完成：" + gap for gap in self.wrapup_gaps]
+        limitations += self.table_gaps
         if self.method_usage and self.method_usage["status"] == "plan_failed":
             limitations.append("本次方法计划未通过格式校验，研究按已加载的基础方法进行。")
         if partial:

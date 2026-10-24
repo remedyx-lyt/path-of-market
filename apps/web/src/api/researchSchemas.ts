@@ -46,6 +46,13 @@ export const coverageSchema = z.object({
 
 const citation = z.object({ sourceId: str, page: int.nullish() })
 
+const sectionTable = z.object({
+  title: str, unit: str, labelHeader: str.optional(), columns: strings.min(1), note: str,
+  rows: z.array(z.object({ label: str, cells: strings, sourceId: str, page: int.positive().nullable(), alsoFrom: z.array(citation).optional(), note: str.optional() })).min(1),
+  chart: z.enum(['none', 'bar', 'line']), chartColumns: z.array(int.nonnegative()),
+  verification: z.object({ checkedCells: finite, matchedCells: finite, unmatched: z.array(z.array(int)) }).optional(),
+}).refine((t) => t.rows.every((r) => r.cells.length === t.columns.length) && t.chartColumns.every((i) => i < t.columns.length), '表格行列不一致')
+
 const marketData = z.object({
   series: z.array(z.object({ date: str, close: finite.positive(), adjustedClose: finite.positive() })).min(2),
   metrics: z.object({ tradingDays: finite, firstRawClose: finite, lastRawClose: finite, adjustedChangePct: finite, maxCloseDrawdownPct: finite }),
@@ -142,7 +149,7 @@ export const agentReportSchema = z.object({
   ...draftFields, mode: z.literal('agent'), isMock: z.literal(false), evidenceStatus: z.enum(['retrieved', 'partial']),
   asOfDate: str, title: str, summary: str,
   sources: z.array(source), coverage: z.array(coverageSchema),
-  sections: z.array(z.object({ heading: str, content: str, citations: z.array(citation), omens: z.array(omen).nullish() })).min(2),
+  sections: z.array(z.object({ heading: str, content: str, citations: z.array(citation), omens: z.array(omen).nullish(), tables: z.array(sectionTable).nullish() })).min(2),
   limitations: strings,
   toolCalls: z.array(z.object({ toolCallId: str, name: str, status: str })),
   run: z.object({ status: z.enum(['completed', 'partial']), taskId: str, model: str, stopReason: str, modelCalls: finite }),
@@ -159,6 +166,12 @@ export const agentReportSchema = z.object({
   const fail = (message: string) => ctx.addIssue({ code: 'custom', message })
   for (const row of report.financialData?.datasets.flatMap((d) => d.rows) ?? []) {
     if (!Object.values(row.evidence).every((e) => documentPage(sources, e.sourceId, e.page))) fail('财务证据页不在来源范围内')
+  }
+  for (const row of report.sections.flatMap((s) => s.tables ?? []).flatMap((t) => t.rows.flatMap((r) => [r, ...(r.alsoFrom ?? []).map((c) => ({ ...c, page: c.page ?? null }))]))) {
+    // 行情来源没有页码（与后端 check_citation 一致，不检查页码）；文件来源的页码须在资料范围内。
+    const source = sources.find((s) => s.sourceId === row.sourceId)
+    const ok = source != null && (source.kind === 'market' || row.page == null || documentPage(sources, row.sourceId, row.page))
+    if (!ok) fail('表格来源页不在资料范围内')
   }
   for (const row of report.businessData?.datasets.flatMap((d) => d.rows) ?? []) {
     const evidence = [row.totalEvidence, ...row.items.filter((item) => !item.derived)]

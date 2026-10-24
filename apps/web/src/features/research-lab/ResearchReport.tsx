@@ -6,6 +6,7 @@ import { MarketChart } from './MarketChart'
 import { FinancialCharts } from './FinancialCharts'
 import { ReportText } from './ReportText'
 import { BusinessCharts, EvidenceDiagram } from './BusinessCharts'
+import { SectionTables } from './SectionTables'
 
 export function ResearchReport({ report }: { report: Report }) {
   if (report.mode === 'agent') return <AgentReportView report={report} />
@@ -91,6 +92,7 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
           {report.financialData && f.financialChartIds.length>0 && <FinancialCharts data={report.financialData} sources={report.sources} chartIds={f.financialChartIds} showDataLabels={showDataLabels} />}
           {f.diagram && <EvidenceDiagram diagram={f.diagram} sources={report.sources} />}
         </div>)}
+        {!!section.tables?.length && <SectionTables tables={section.tables} sources={report.sources} showDataLabels={showDataLabels} />}
         <div className="section-citations">{section.citations.map((citation, j) => {
           const source = report.sources.find((s) => s.sourceId === citation.sourceId)
           return source ? <a key={`${citation.sourceId}-${j}`} href={`${source.url}${citation.page ? `#page=${citation.page}` : ''}`} target="_blank" rel="noreferrer">

@@ -70,6 +70,9 @@ class ScriptedModel:
             note = {"summary": "已检查本批所有原文。", "facts": [{"text": "本批含原文数字和研究费用，需核对实际单位。",
                 "pages": [999 if self.invalid_note and self.readings == 1 else task["pages"][0]["page"]]}], "gaps": []}
             return {"role": "assistant", "content": json.dumps(note, ensure_ascii=False)}, usage
+        if kwargs.get("tool_choice") == "none" and str(messages[-1].get("content", "")).startswith("报告正文已写好"):
+            # 写作第二步：单独生成数据表（本脚本不关心表格内容）。
+            return {"role": "assistant", "content": json.dumps({"tables": []})}, usage
         self.decisions += 1
         if self.unknown_tool and self.decisions == 1:
             calls = [("bash", {"command": "must-not-execute"})]

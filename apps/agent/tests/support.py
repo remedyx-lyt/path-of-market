@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "apps/agent"))
 
 from pypdf import PdfReader, PdfWriter  # noqa: E402
 
-from app.core.agent_prompts import METHOD_SYSTEM, READ_SYSTEM, REVIEW_SYSTEM  # noqa: E402
+from app.core.agent_prompts import METHOD_SYSTEM, READ_SYSTEM, REVIEW_SYSTEM, TABLE_RULES  # noqa: E402
 from app.core.config import ModelSettings  # noqa: E402
 from app.schemas.agent import AgentResearchRequest  # noqa: E402
 from app.services.agent_runner import AgentRunner, RunLimits  # noqa: E402
@@ -105,12 +105,13 @@ DEFAULT_SCRIPT = [
 class FakeModel:
     """按请求类型应答：方法计划 / 阅读 / 主循环决策 / 写作 / 复核。记录每次调用便于断言。"""
 
-    def __init__(self, *, script=None, final=None, plan=None, review=None, ready=False):
+    def __init__(self, *, script=None, final=None, plan=None, review=None, ready=False, tables=None):
         self.script = list(script or DEFAULT_SCRIPT)
         self.final = final or report()
         self.plan = plan
         self.review = review if review is not None else {"unchanged": True}
         self.ready = ready
+        self.tables = tables if tables is not None else [{"tables": []}]  # 每次数据表请求依次返回
         self.calls = []  # (kind, max_tokens, messages, kwargs)
 
     def kind(self, messages, kwargs):
@@ -123,6 +124,8 @@ class FakeModel:
             return "review"
         if system == READ_SYSTEM:
             return "reading"
+        if str(messages[-1].get("content", "")).startswith(TABLE_RULES[:20]):
+            return "tables"
         return "compose"
 
     def default_plan(self, task):
@@ -161,6 +164,9 @@ class FakeModel:
             return {"role": "assistant", "content": json.dumps(note, ensure_ascii=False)}, USAGE
         if kind == "review":
             return {"role": "assistant", "content": json.dumps(self.review, ensure_ascii=False)}, USAGE
+        if kind == "tables":
+            reply = self.tables[min(self.count("tables"), len(self.tables)) - 1]
+            return {"role": "assistant", "content": reply if isinstance(reply, str) else json.dumps(reply, ensure_ascii=False)}, USAGE
         if kind == "compose":
             return {"role": "assistant", "content": json.dumps(self.final, ensure_ascii=False)}, USAGE
         step = len([c for c in self.calls if c[0] == "decision"])

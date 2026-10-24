@@ -53,10 +53,17 @@ export type BusinessData = {
     items: { label: string; value: number; share: number; derived: boolean; sourceId?: string; page?: number; rawValue?: string; unit?: string; quote?: string }[]
   }[] }[]
 }
+/** 模型根据原文自行做的数据表；verification 是程序逐格核对结果（unmatched 为未在所引原页找到的 [行, 列]）。 */
+export type SectionTable = {
+  title: string; unit: string; labelHeader?: string; columns: string[]; note: string
+  rows: { label: string; cells: string[]; sourceId: string; page: number | null; alsoFrom?: { sourceId: string; page?: number | null }[]; note?: string }[]
+  chart: 'none' | 'bar' | 'line'; chartColumns: number[]
+  verification?: { checkedCells: number; matchedCells: number; unmatched: number[][] }
+}
 export type FigurePlan = { sectionIndex: number; financialChartIds: string[]; businessDatasetIds: string[]; diagram: SectionDiagram | null; gap: string | null }
 export type AgentResearchReport = ResearchDraft & {
   mode: 'agent'; isMock: false; asOfDate: string; evidenceStatus: 'retrieved' | 'partial'; title: string; summary: string
-  sections: { heading: string; content: string; topics?: string[]; omens?: ReportOmen[]; citations: { sourceId: string; page?: number | null }[] }[]
+  sections: { heading: string; content: string; topics?: string[]; omens?: ReportOmen[]; tables?: SectionTable[]; citations: { sourceId: string; page?: number | null }[] }[]
   sources: EvidenceSource[]; coverage: ReadCoverage[]; marketData: MarketData | null; limitations: string[]
   financialData?: FinancialData | null
   businessData?: BusinessData

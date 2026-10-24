@@ -144,7 +144,7 @@ class RunnerChecks(unittest.IsolatedAsyncioTestCase):
             job=ResearchJob(req);runner=AgentRunner(job,Tools(Path(temp)),ModelSettings('test'),completion=complete)
             runner.source(DOC);runner.coverage[DOC['documentId']].update(textComplete=True,processedPages=[1,2])
             await runner.run()
-            self.assertEqual(job.status,'completed',job.error);self.assertEqual(limits,[6500,6500,14000,14000])
+            self.assertEqual(job.status,'completed',job.error);self.assertEqual(limits,[6500,6500,14000,14000,14000])  # 决策、决策、正文写作、数据表、复核
 
     async def test_19_invalid_response_usage_is_still_counted(self):
         async def complete(*args,**kwargs):

@@ -48,8 +48,9 @@ class TokenEfficiency(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         job, runner = self.runner(model)
         await runner.run()
         self.assertEqual(job.status, "completed", job.error)
-        self.assertEqual(model.count("rejected"), 1)
+        self.assertEqual(model.count("rejected"), 2)  # 正文与数据表两步各被拒一次，均回退
         self.assertEqual(model.count("compose"), 1)
+        self.assertEqual(model.count("tables"), 1)
         self.assertTrue(any(e["type"] == "report_drafting_fallback" for e in job.events))
 
     async def test_reading_notes_shared_across_questions(self):
