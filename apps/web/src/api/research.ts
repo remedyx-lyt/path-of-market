@@ -84,10 +84,18 @@ export type OmenCoverage = {
   omen: ReportOmen; name: string; covered: boolean; coverageScope: string; verification: string
   sections: string[]; addressed: string[]; missingItems: string[]; capabilityGaps: string[]; skillsRead: string[]; planChecks: number
 }
+/** 研究事件（JSONL 方向的事件结构：id/parentId/type/timestamp 加各类事件的结构化字段，供活动流展示）。 */
+export type JobEvent = {
+  id: string; parentId: string | null; type: string; message: string; timestamp: string
+  phase?: string; toolCallId?: string; name?: string; label?: string; summary?: string; result?: string; status?: string
+  durationMs?: number; modelCall?: number; purpose?: string; usage?: Record<string, number>; title?: string
+  focus?: string; checks?: { question: string; topic: string; omen?: string | null }[]
+}
 export type ResearchJob = {
   taskId: string; status: 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'; target: string
   progress: string; modelCalls: number; usage: Record<string, number>; coverage: ReadCoverage[]
-  events: { id: string; parentId: string | null; type: string; message: string; timestamp: string }[]
+  phase?: string
+  events: JobEvent[]
   report: AgentResearchReport | null; error: { code: string; message: string } | null
 }
 export type ResearchReport = MockResearchReport | ModelResearchReport | AgentResearchReport

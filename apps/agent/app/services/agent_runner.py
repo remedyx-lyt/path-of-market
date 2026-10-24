@@ -64,12 +64,24 @@ TOOL_SPECS = (
 )
 
 
+TOOL_LABELS = {
+    "find_documents": "查找报告",
+    "read_document": "阅读资料",
+    "get_market_data": "查询行情",
+    "inspect_document_pages": "查看PDF原页",
+    "read_research_skill": "读取研究方法",
+    "extract_report_data": "提取数据",
+}
+
+
 def declarations():
     return [
         {"type": "function", "function": {"name": name, "description": description, "parameters": schema.model_json_schema(by_alias=True)}}
         for name, description, schema in TOOL_SPECS
     ]
 
+
+PHASE_PURPOSE = {"methods": "形成研究计划", "writing": "撰写正文", "tables": "整理数据表", "review": "复核报告"}
 
 READY = re.compile(r'\{\s*"ready"\s*:\s*true\s*\}')
 
@@ -206,17 +218,26 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
         if "total_tokens" not in usage and "prompt_tokens" in usage and "completion_tokens" in usage:
             self.job.usage["total_tokens"] = self.job.usage.get("total_tokens", 0) + usage["prompt_tokens"] + usage["completion_tokens"]
 
-    async def model(self, messages, *, tool_specs=None, reading=False, visual=False, report=False, write_only=False):
-        """write_only=True：发送同一组工具定义但禁止调用（tool_choice=none）并要求 JSON，让写作请求与研究轮次共享缓存前缀。"""
+    def model_purpose(self, *, tool_specs, reading, visual, write_only):
+        """活动流里这次模型调用做什么：由调用方式和当前阶段决定。"""
+        if visual:
+            return "查看PDF原页"
+        if reading:
+            return "阅读原文"
+        if tool_specs and not write_only:
+            return "决定下一步"
+        return PHASE_PURPOSE.get(self.job.phase, "提取数据")
+
+    async def model(self, messages, *, tool_specs=None, reading=False, visual=False, report=False, write_only=False, on_text=None):
+        """write_only=True：发送同一组工具定义但禁止调用（tool_choice=none）并要求 JSON，让写作请求与研究轮次共享缓存前缀。
+        on_text：流式输出时逐段收到模型文字（写作阶段据此显示“正在写：××”）。"""
         self.check_budget()
         if context_characters(messages) > self.limits.max_context_characters:
             raise BudgetStop("context_budget")
         self.job.model_calls += 1
-        self.job.emit(
-            "model_started",
-            "查看PDF原页图像" if visual else "阅读原文" if reading else "判断下一步研究动作",
-            modelCall=self.job.model_calls,
-        )
+        purpose = self.model_purpose(tool_specs=tool_specs, reading=reading, visual=visual, write_only=write_only)
+        started = time.monotonic()
+        self.job.emit("model_started", purpose, modelCall=self.job.model_calls, purpose=purpose)
         # 多预兆报告允许更长：每个预兆追加输出预算，不为篇幅牺牲预兆分析。
         report_tokens = self.limits.report_tokens + 2500 * len(self.job.request.omens)
         output_tokens = min(1800, self.settings.max_tokens) if reading else report_tokens if report else 6500
@@ -225,12 +246,21 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
         settings = replace(self.settings, timeout_seconds=self.settings.report_timeout_seconds) if report else self.settings
         try:
             options = {"tool_choice": "none", "json_mode": True} if write_only else {"json_mode": not bool(tool_specs)}
+            if on_text:
+                options["on_text"] = on_text
             message, usage = await self.completion(settings, messages, tools=tool_specs, max_tokens=output_tokens, **options)
         except ModelServiceError as error:
             self.record_usage(getattr(error, "usage", {}))
             raise
         self.record_usage(usage)
-        self.job.emit("model_finished", "模型调用完成", modelCall=self.job.model_calls, usage=usage)
+        self.job.emit(
+            "model_finished",
+            f"{purpose}完成",
+            modelCall=self.job.model_calls,
+            purpose=purpose,
+            usage=usage,
+            durationMs=round((time.monotonic() - started) * 1000),
+        )
         return message
 
     async def raw_tool(self, name, arguments):
@@ -398,6 +428,7 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
             content = await self.review(content)
             self.job.report = self.report(content)
             self.job.status = "completed"
+            self.job.set_phase("done", "阶段：完成")
             self.job.emit("run_completed", "研究完成，报告与证据已返回")
             return True
         except ValueError as error:
@@ -414,6 +445,7 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
             self.messages.pop()
             self.invalid_finals += 1
             self.job.emit("report_validation_failed", "报告需修正：" + diagnostics[:300])
+            self.job.set_phase("research", "阶段：按核查意见修改或补查")
             if self.invalid_finals >= 3:
                 raise BudgetStop("incomplete_evidence_or_report")
             self.messages.append(
@@ -426,7 +458,8 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
         name = call["function"]["name"]
         record = {"toolCallId": call["id"], "name": name, "status": "running", "startedAt": now()}
         self.job.tool_calls.append(record)
-        self.job.emit("tool_started", "执行工具：" + name, toolCallId=call["id"], name=name)
+        label, summary, started = TOOL_LABELS.get(name, name), self.describe_call(name, call["function"]["arguments"]), time.monotonic()
+        self.job.emit("tool_started", f"{label}：{summary}" if summary else label, toolCallId=call["id"], name=name, label=label, summary=summary)
         try:
             arguments = json.loads(call["function"]["arguments"])
             if not isinstance(arguments, dict):
@@ -457,19 +490,80 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
             record.update(status="failed", errorCode=code)
         record["finishedAt"] = now()
         self.messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, ensure_ascii=False)})
+        outcome = self.describe_result(name, result)
         self.job.emit(
             "tool_finished",
-            name + (" 完成" if record["status"] == "completed" else " 未完成"),
+            f"{label}{'完成' if record['status'] == 'completed' else '未完成'}：{outcome}",
             toolCallId=call["id"],
+            name=name,
+            label=label,
             status=record["status"],
+            result=outcome,
+            durationMs=round((time.monotonic() - started) * 1000),
         )
+
+    def document_title(self, identifier):
+        document = self.sources.get(identifier) or self.discovered.get(identifier) or {}
+        return document.get("title") or identifier
+
+    def describe_call(self, name, raw_arguments):
+        """活动流里的可读参数，如“通读 2025年年度报告”“回查 第13、25页”。参数不合法时返回空。"""
+        try:
+            a = json.loads(raw_arguments)
+        except ValueError:
+            return ""
+        if not isinstance(a, dict):
+            return ""
+        pages = lambda value: "、".join(map(str, value)) if isinstance(value, list) else str(value)
+        doc = self.document_title(a.get("documentId", ""))
+        if name == "find_documents":
+            return f"{a.get('company', '')} {pages(a.get('years', []))}年 {pages(a.get('reportTypes', ['年报']))}".strip()
+        if name == "read_document":
+            mode = a.get("mode", "full")
+            if mode == "full":
+                return f"通读 {doc}"
+            if mode == "search":
+                return f"在 {doc} 中查找“{a.get('query', '')}”"
+            return f"回查 {doc} 第{pages(a.get('pages') or [a.get('page')])}页"
+        if name == "get_market_data":
+            return f"{a.get('company', '')} {a.get('startDate', '')} 至 {a.get('endDate', '')}"
+        if name in {"inspect_document_pages", "extract_report_data"}:
+            return f"{doc} 第{pages(a.get('pages', []))}页"
+        if name == "read_research_skill":
+            return str(a.get("reference", "")).split("/skills/")[-1]
+        return ""
+
+    def describe_result(self, name, result):
+        if result["status"] != "completed":
+            return result["error"]["message"]
+        data = result["data"]
+        if name == "find_documents":
+            return f"找到 {len(data.get('documents', []))} 份报告"
+        if name == "read_document":
+            coverage = data.get("coverage")
+            if coverage:
+                return f"已处理 {len(coverage['processedPages'])}/{coverage['pageCount']} 页" + ("（复用已读记录）" if data.get("cacheHit") else "")
+            if "matches" in data:
+                return f"找到 {len(data['matches'])} 处"
+            return f"返回 {len(data['pages']) if isinstance(data.get('pages'), list) else 1} 页原文"
+        if name == "get_market_data":
+            return f"{data.get('metrics', {}).get('tradingDays', '?')} 个交易日"
+        if name == "extract_report_data":
+            return f"核对 {data.get('verifiedPointCount', 0)} 个财务值、{data.get('segmentPointCount', 0)} 个业务收入值"
+        if name == "inspect_document_pages":
+            return f"查看 {len(data.get('observations', []))} 页"
+        if name == "read_research_skill":
+            return f"{len(data.get('files', [])) or len(data.get('content', ''))} " + ("个文件" if "files" in data else "字")
+        return "完成"
 
     async def run(self):
         self.job.status = "running"
         self.job.emit("run_started", "开始研究；模型将选择需要的报告和行情")
         try:
             async with asyncio.timeout(self.limits.max_seconds):
+                self.job.set_phase("methods", "阶段：阅读研究方法、形成研究计划")
                 await self.prepare_methods()
+                self.job.set_phase("research", "阶段：取证——查找、阅读与回查资料")
                 for step in range(1, self.limits.max_steps + 1):
                     self.steps = step
                     self.check_budget()
@@ -482,7 +576,10 @@ class AgentRunner(ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, ReportMix
                     assistant = await self.compose() if self.context_wrapup else await self.model(messages, tool_specs=self.declarations())
                     self.messages.append(assistant)
                     calls = assistant.get("tool_calls") or []
-                    self.job.emit("assistant_message", "模型提出研究动作" if calls else "模型提交研究报告")
+                    names = [TOOL_LABELS.get(c["function"]["name"], c["function"]["name"]) for c in calls]
+                    self.job.emit(
+                        "assistant_message", "模型决定：" + "、".join(names) if calls else "模型认为证据已够，进入写作", tools=names
+                    )
                     if not calls:
                         if await self.finish(assistant):
                             return

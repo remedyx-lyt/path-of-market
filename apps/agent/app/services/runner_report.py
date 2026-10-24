@@ -364,6 +364,7 @@ class ReportMixin:
         }
 
     async def review(self, content):
+        self.enter_phase("review", "阶段：复核报告")
         self.job.emit("report_review", "核对报告文字、资料范围与行情计算口径")
         try:
             message = await self.model(
@@ -457,12 +458,15 @@ class ReportMixin:
         )
         if operating:
             request += "\n必做的产能/产销数据页：" + json.dumps([{"sourceId": sid, "pages": p} for sid, p in operating.items()], ensure_ascii=False)
+        self.enter_phase("tables", "阶段：根据原文整理数据表")
         tables = []
         for attempt in range(2):
             self.job.emit("table_drafting", "根据已读原文整理数据表" if attempt == 0 else "补做必做的产能/产销表")
             messages = self.context() + [{"role": "user", "content": request}]
             try:
-                message = await self.model(messages, tool_specs=self.declarations(), report=True, write_only=True)
+                message = await self.model(
+                    messages, tool_specs=self.declarations(), report=True, write_only=True, on_text=self.text_watcher("title", "table_section", "正在整理表")
+                )
             except ModelServiceError as error:
                 if error.code not in {"MODEL_UPSTREAM_ERROR", "MODEL_INVALID_RESPONSE"}:
                     raise
@@ -485,7 +489,30 @@ class ReportMixin:
             self.table_gaps.append(f"资料中有产能/产量/销量/库存数据（{pages}），但本次未能生成对应数据表。")
         return content
 
+    def enter_phase(self, phase, message):
+        if self.job.phase != phase:
+            self.job.set_phase(phase, message)
+
+    def text_watcher(self, key, event_type, label):
+        """流式输出时，从已收到的文字里找出新写完的字段值（章节标题、表名），逐个发事件：活动流显示“正在写：××”。"""
+        pattern = re.compile(rf'"{key}"\s*:\s*"((?:[^"\\]|\\.)*)"')
+        state = {"text": "", "pos": 0, "count": 0}
+
+        def on_text(delta):
+            state["text"] += delta
+            for match in pattern.finditer(state["text"], state["pos"]):
+                state["pos"] = match.end()
+                try:
+                    title = json.loads('"' + match.group(1) + '"')
+                except ValueError:
+                    title = match.group(1)
+                self.job.emit(event_type, f"{label}：{title}", index=state["count"], title=title)
+                state["count"] += 1
+
+        return on_text
+
     async def compose(self):
+        self.enter_phase("writing", "阶段：撰写报告正文")
         self.job.emit("report_drafting", "根据已有证据和所选方法撰写图文报告")
         # 保持与研究循环相同的系统提示和历史前缀，DeepSeek 前缀缓存可命中；写作规则作为最后一条用户消息追加。
         messages = self.context()
@@ -499,7 +526,9 @@ class ReportMixin:
             }
         )
         try:
-            return await self.model(messages, tool_specs=self.declarations(), report=True, write_only=True)
+            return await self.model(
+                messages, tool_specs=self.declarations(), report=True, write_only=True, on_text=self.text_watcher("heading", "writing_section", "正在写")
+            )
         except ModelServiceError as error:
             if error.code not in {"MODEL_UPSTREAM_ERROR", "MODEL_INVALID_RESPONSE"}:
                 raise

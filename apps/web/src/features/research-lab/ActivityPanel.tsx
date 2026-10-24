@@ -1,0 +1,105 @@
+import { useEffect, useRef } from 'react'
+import type { JobEvent, ResearchJob } from '../../api/research'
+
+const PHASES = [
+  { id: 'methods', label: '读方法与计划' },
+  { id: 'research', label: '取证' },
+  { id: 'writing', label: '写正文' },
+  { id: 'tables', label: '整理数据表' },
+  { id: 'review', label: '复核' },
+  { id: 'done', label: '完成' },
+] as const
+
+/** 值得单独列出的过程事件（其余如逐批阅读进度并入对应工具行）。 */
+const NOTES = new Set(['current_period_lookup', 'skill_read', 'data_extracted', 'visual_gap', 'context_wrapup', 'report_validation_failed',
+  'report_normalized', 'figure_duplicates_removed', 'unknown_figures_removed', 'required_figures_placed', 'tables_dropped',
+  'review_discarded', 'report_drafting_fallback', 'methods_plan_failed', 'run_partial', 'run_failed', 'run_cancelled'])
+
+type Item =
+  | { kind: 'phase'; id: string; text: string }
+  | { kind: 'tool'; id: string; label: string; summary: string; status: string; result?: string; durationMs?: number; progress?: string }
+  | { kind: 'model'; id: string; text: string; durationMs?: number; tokens?: number; running: boolean }
+  | { kind: 'decision' | 'note'; id: string; text: string; warn?: boolean }
+  | { kind: 'section'; id: string; text: string; done: boolean }
+
+function seconds(ms?: number) {
+  return ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
+}
+
+/** 把事件序列整理成时间线：工具开始/结束合并成一行；模型调用合并；写作阶段逐节列出。 */
+function timeline(events: JobEvent[]): Item[] {
+  const items: Item[] = []
+  const tools = new Map<string, Extract<Item, { kind: 'tool' }>>()
+  const models = new Map<number, Extract<Item, { kind: 'model' }>>()
+  let lastSection: Extract<Item, { kind: 'section' }> | null = null
+  let runningTool: Extract<Item, { kind: 'tool' }> | null = null
+  for (const e of events) {
+    if (e.type === 'phase_changed') {
+      if (lastSection) lastSection.done = true
+      lastSection = null
+      items.push({ kind: 'phase', id: e.id, text: e.message.replace(/^阶段：/, '') })
+    } else if (e.type === 'tool_started' && e.toolCallId) {
+      const item = { kind: 'tool' as const, id: e.id, label: e.label ?? e.name ?? '工具', summary: e.summary ?? '', status: 'running' }
+      tools.set(e.toolCallId, item); items.push(item); runningTool = item
+    } else if (e.type === 'tool_finished' && e.toolCallId && tools.has(e.toolCallId)) {
+      Object.assign(tools.get(e.toolCallId)!, { status: e.status ?? 'completed', result: e.result, durationMs: e.durationMs, progress: undefined })
+      runningTool = null
+    } else if (e.type === 'reading_processed' && runningTool) {
+      runningTool.progress = e.message.replace(/^.*?：/, '')
+    } else if (e.type === 'model_started' && e.modelCall != null && e.purpose !== '决定下一步' && e.purpose !== '阅读原文') {
+      const item = { kind: 'model' as const, id: e.id, text: e.purpose ?? e.message, running: true }
+      models.set(e.modelCall, item); items.push(item)
+    } else if (e.type === 'model_finished' && e.modelCall != null && models.has(e.modelCall)) {
+      Object.assign(models.get(e.modelCall)!, { running: false, durationMs: e.durationMs, tokens: e.usage?.total_tokens })
+    } else if (e.type === 'assistant_message') {
+      items.push({ kind: 'decision', id: e.id, text: e.message })
+    } else if (e.type === 'writing_section' || e.type === 'table_section') {
+      if (lastSection) lastSection.done = true
+      lastSection = { kind: 'section', id: e.id, text: e.message, done: false }
+      items.push(lastSection)
+    } else if (NOTES.has(e.type)) {
+      items.push({ kind: 'note', id: e.id, text: e.message, warn: /failed|dropped|discarded|partial|gap|fallback|cancelled/.test(e.type) })
+    }
+  }
+  return items
+}
+
+export function ActivityPanel({ job, live }: { job: ResearchJob; live: boolean }) {
+  const listRef = useRef<HTMLOListElement>(null)
+  const items = timeline(job.events)
+  const current = PHASES.findIndex((p) => p.id === job.phase)
+  const plan = job.events.find((e) => e.type === 'methods_planned')
+  const hit = job.usage.prompt_cache_hit_tokens, miss = job.usage.prompt_cache_miss_tokens
+  const elapsed = (Date.parse(job.events.at(-1)?.timestamp ?? '') - Date.parse(job.events[0]?.timestamp ?? '')) / 1000
+  useEffect(() => {
+    if (live && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
+  }, [live, items.length])
+  return <section className="activity-panel" aria-label="研究过程">
+    <ol className="activity-phases">{PHASES.map((p, i) => <li key={p.id} className={i < current || job.phase === 'done' ? 'is-done' : i === current ? 'is-current' : ''}>{p.label}</li>)}</ol>
+    <p className="activity-meter">
+      模型调用 {job.modelCalls} 次 · {(job.usage.total_tokens ?? 0).toLocaleString()} tokens
+      {typeof hit === 'number' && typeof miss === 'number' && hit + miss > 0 ? ` · 缓存命中 ${Math.round(hit / (hit + miss) * 100)}%` : ''}
+      {Number.isFinite(elapsed) && elapsed > 0 ? ` · 用时 ${Math.floor(elapsed / 60)}分${Math.round(elapsed % 60)}秒` : ''}
+    </p>
+    {plan?.checks?.length ? <details className="activity-plan"><summary>研究计划 · {plan.checks.length} 项检查</summary>
+      {plan.focus ? <p>{plan.focus}</p> : null}
+      <ol>{plan.checks.map((c, i) => <li key={i}>{c.question}</li>)}</ol>
+    </details> : null}
+    <ol className="activity-timeline" ref={listRef} aria-live={live ? 'polite' : undefined}>{items.map((item) => {
+      if (item.kind === 'phase') return <li key={item.id} className="activity-phase">{item.text}</li>
+      if (item.kind === 'tool') return <li key={item.id} className={`activity-tool is-${item.status}`}>
+        <span className="activity-mark" aria-hidden="true">{item.status === 'running' ? '◌' : item.status === 'completed' ? '✓' : '✕'}</span>
+        <div><strong>{item.label}</strong> {item.summary}
+          <small>{item.status === 'running' ? item.progress ?? '进行中…' : item.result}{item.durationMs != null ? ` · ${seconds(item.durationMs)}` : ''}</small></div>
+      </li>
+      if (item.kind === 'model') return <li key={item.id} className={`activity-model${item.running ? ' is-running' : ''}`}>
+        <span className="activity-mark" aria-hidden="true">{item.running ? '◌' : '✓'}</span>
+        <div><strong>模型</strong> {item.text}<small>{item.running ? '进行中…' : [seconds(item.durationMs), item.tokens ? `${item.tokens.toLocaleString()} tokens` : ''].filter(Boolean).join(' · ')}</small></div>
+      </li>
+      if (item.kind === 'section') return <li key={item.id} className={`activity-section${item.done ? '' : ' is-running'}`}>
+        <span className="activity-mark" aria-hidden="true">{item.done ? '✓' : '✎'}</span><div>{item.done ? item.text.replace(/^正在写/, '已写').replace(/^正在整理表/, '已整理表') : item.text}</div>
+      </li>
+      return <li key={item.id} className={`activity-${item.kind}${item.kind === 'note' && item.warn ? ' is-warn' : ''}`}><div>{item.text}</div></li>
+    })}</ol>
+  </section>
+}

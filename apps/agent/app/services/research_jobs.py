@@ -14,6 +14,7 @@ class ResearchJob:
     task_id: str = field(default_factory=lambda: str(uuid4()))
     session_id: str = field(default_factory=lambda: str(uuid4()))
     status: str = "queued"
+    phase: str = "queued"  # 研究阶段：methods → research → writing → tables → review → done（活动流显示用）
     started_at: str = field(default_factory=now)
     finished_at: str | None = None
     events: list = field(default_factory=list)
@@ -41,16 +42,23 @@ class ResearchJob:
             }
         )
 
+    def set_phase(self, phase, message):
+        """切换研究阶段并记一条事件，网页据此显示阶段进度。"""
+        self.phase = phase
+        self.emit("phase_changed", message, phase=phase)
+
     def snapshot(self):
         return {
             "taskId": self.task_id,
             "sessionId": self.session_id,
             "status": self.status,
+            "phase": self.phase,
             "target": self.request.target,
             "startedAt": self.started_at,
             "finishedAt": self.finished_at,
             "progress": self.events[-1]["message"] if self.events else "等待开始",
-            "events": self.events[-160:],
+            # 活动流需要完整过程；一次研究通常几百条，设上限防止异常膨胀。
+            "events": self.events[-3000:],
             "eventCount": len(self.events),
             "modelCalls": self.model_calls,
             "usage": self.usage,

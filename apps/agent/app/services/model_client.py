@@ -85,6 +85,93 @@ def _request_payload(settings: ModelSettings, payload: dict) -> dict:
         connection.close()
 
 
+def _stream_payload(settings: ModelSettings, payload: dict, on_text) -> dict:
+    """流式请求：按 SSE 逐行读取 `data:` 块，文字增量交给 on_text，最后拼成与非流式相同结构的 body。
+
+    依据 DeepSeek Chat Completion 文档：data-only SSE、`data: [DONE]` 结束；stream_options.include_usage 时最后一块带用量；
+    工具调用首块带 id/type/function，后续块只带 arguments。非 `data:` 行（如 keep-alive 注释）忽略。
+    """
+    url = urlsplit(settings.base_url)
+    connection_class = http.client.HTTPSConnection if url.scheme == "https" else http.client.HTTPConnection
+    connection = connection_class(url.hostname, url.port, timeout=min(10, settings.timeout_seconds))
+    deadline = time.monotonic() + settings.timeout_seconds
+    response = None
+    content, calls, finish_reason, usage, size = [], {}, None, None, 0
+    try:
+        connection.connect()
+
+        def remaining() -> None:
+            seconds = deadline - time.monotonic()
+            if seconds <= 0:
+                raise TimeoutError
+            if connection.sock is not None:
+                connection.sock.settimeout(seconds)
+
+        remaining()
+        connection.request(
+            "POST",
+            url.path.rstrip("/") + "/chat/completions",
+            body=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Authorization": f"Bearer {settings.api_key}", "Content-Type": "application/json", "Accept": "text/event-stream"},
+        )
+        remaining()
+        response = connection.getresponse()
+        if response.status != 200:
+            errors = {
+                401: ("MODEL_AUTH_FAILED", "模型密钥验证失败，请检查 .env 中的密钥。"),
+                403: ("MODEL_AUTH_FAILED", "模型接口拒绝访问，请检查密钥和账户权限。"),
+                402: ("MODEL_BALANCE_INSUFFICIENT", "模型账户余额或额度不足，请到供应商平台检查。"),
+                429: ("MODEL_RATE_LIMITED", "模型调用过于频繁或额度受限，请稍后再试。"),
+            }
+            code, message = errors.get(response.status, ("MODEL_UPSTREAM_ERROR", "模型接口暂时无法完成请求，请检查模型配置或稍后重试。"))
+            raise ModelServiceError(code, message, 503 if response.status in errors else 502)
+        while True:
+            remaining()
+            line = response.readline(MAX_RESPONSE_BYTES)
+            if not line:
+                break
+            size += len(line)
+            if size > MAX_RESPONSE_BYTES * 2:
+                raise ValueError
+            text = line.decode("utf-8").strip()
+            if not text.startswith("data:"):
+                continue
+            data = text[5:].strip()
+            if data == "[DONE]":
+                break
+            chunk = json.loads(data)
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+            for choice in chunk.get("choices") or []:
+                delta = choice.get("delta") or {}
+                if delta.get("content"):
+                    content.append(delta["content"])
+                    on_text(delta["content"])
+                for call in delta.get("tool_calls") or []:
+                    slot = calls.setdefault(call.get("index", 0), {"id": None, "type": "function", "function": {"name": "", "arguments": ""}})
+                    slot["id"] = call.get("id") or slot["id"]
+                    function = call.get("function") or {}
+                    slot["function"]["name"] += function.get("name") or ""
+                    slot["function"]["arguments"] += function.get("arguments") or ""
+                finish_reason = choice.get("finish_reason") or finish_reason
+        message = {"role": "assistant", "content": "".join(content) or None}
+        if calls:
+            message["tool_calls"] = [calls[i] for i in sorted(calls)]
+        return {"choices": [{"message": message, "finish_reason": finish_reason}], "usage": usage}
+    except ModelServiceError:
+        raise
+    except (TimeoutError, socket.timeout):
+        raise ModelServiceError("MODEL_TIMEOUT", "模型响应超时，请重试或缩短问题。", 504) from None
+    except (OSError, http.client.HTTPException):
+        raise ModelServiceError("MODEL_UNAVAILABLE", "无法连接模型接口，请检查网络和接口地址。") from None
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError, UnicodeDecodeError):
+        raise ModelServiceError("MODEL_INVALID_RESPONSE", "模型未返回完整且有效的报告，请重试或调整输出长度。", 502) from None
+    finally:
+        if response is not None:
+            response.close()
+        connection.close()
+
+
 async def complete_turn(
     settings: ModelSettings,
     messages: list[dict],
@@ -93,9 +180,11 @@ async def complete_turn(
     max_tokens: int | None = None,
     json_mode: bool = True,
     tool_choice: str = "auto",
+    on_text=None,
 ) -> tuple[dict, dict]:
     """标准 assistant/tool 协议；工具执行留给 Runner，截断的工具参数不执行。
 
+    on_text 不为空时改用流式输出（见 _stream_payload），逐段把文字交给 on_text。
     tool_choice="none" 用于写作阶段：仍发送同一组工具定义，使提示开头与研究轮次一致（前缀缓存可命中），但不允许调用工具。
     """
     payload = {
@@ -109,10 +198,16 @@ async def complete_turn(
         payload.update(tools=tools, tool_choice=tool_choice)
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
+    if on_text:
+        # 流式输出：写作阶段边写边显示进度；返回结构与非流式相同，后续校验不变。
+        payload.update(stream=True, stream_options={"include_usage": True})
     body, choice = None, None
     try:
         async with asyncio.timeout(settings.timeout_seconds):
-            body = await asyncio.to_thread(_request_payload, settings, payload)
+            if on_text:
+                body = await asyncio.to_thread(_stream_payload, settings, payload, on_text)
+            else:
+                body = await asyncio.to_thread(_request_payload, settings, payload)
         choice = body["choices"][0]
         message = choice["message"]
         calls = message.get("tool_calls") or []

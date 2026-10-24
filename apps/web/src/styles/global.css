@@ -271,3 +271,30 @@ button:disabled { opacity: 0.55; cursor: wait; }
 .report-prose ul li::marker { color: #70a895; }
 .report-prose .report-subhead { margin-top: 20px; font-size: 14px; font-weight: 650; color: #111; }
 .report-prose strong { color: #111; font-weight: 650; }
+/* M2-9 活动流：研究进行中在深色任务卡片里实时显示；完成后收进白色报告区的“研究过程回放”。颜色随所在区域切换。 */
+.activity-panel { --ink: #f5f5f5; --muted: #a5a5a0; --line: #3a3a37; --soft: #2a2a28; --accent: #70d6bd; --warn: #e3b46b; margin-top: 18px; color: var(--ink); }
+.research-preview--agent .activity-panel { --ink: #111; --muted: #8a8a8a; --line: #e7e9e1; --soft: #f7f7f5; --accent: #70a895; --warn: #9a6a2f; }
+.activity-phases { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 0 0 12px; }
+.activity-phases li { font-size: 12px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+.activity-phases li.is-done { color: var(--ink); }
+.activity-phases li.is-current { color: #111; background: var(--accent); border-color: var(--accent); font-weight: 650; }
+.activity-meter { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin: 0 0 10px; }
+.activity-plan { font-size: 13px; margin-bottom: 12px; color: var(--ink); }
+.activity-plan > summary { cursor: pointer; }
+.activity-plan p, .activity-plan li { color: var(--muted); }
+.activity-plan ol { padding-left: 1.3em; margin-top: 6px; }
+.activity-timeline { list-style: none; padding: 0; margin: 0; max-height: 62vh; overflow-y: auto; border-top: 1px solid var(--line); }
+.activity-timeline > li { display: flex; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.6; color: var(--ink); }
+.activity-timeline strong { font-weight: 650; }
+.activity-timeline small { display: block; color: var(--muted); font-size: 12px; }
+.activity-timeline .activity-mark { width: 16px; flex: none; text-align: center; color: var(--accent); }
+.activity-timeline .is-running .activity-mark { animation: activity-pulse 1.2s ease-in-out infinite; }
+.activity-timeline .is-failed .activity-mark { color: #e07a5f; }
+.activity-timeline .activity-phase { font-weight: 650; background: var(--soft); padding-left: 8px; }
+.activity-timeline .activity-decision { color: var(--muted); padding-left: 28px; }
+.activity-timeline .activity-note { color: var(--muted); font-size: 12px; padding-left: 28px; }
+.activity-timeline .activity-note.is-warn { color: var(--warn); }
+.activity-replay { margin: 4px 0 18px; font-size: 13px; }
+.activity-replay > summary { cursor: pointer; color: #555; }
+@keyframes activity-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .activity-timeline .is-running .activity-mark { animation: none; } }

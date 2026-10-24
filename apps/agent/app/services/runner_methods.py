@@ -124,4 +124,6 @@ class MethodMixin:
             "methods_planned",
             f"已完整读取{len(references)}份相关原版方法并形成研究计划{reused}",
             references=[r["reference"] for r in references],
+            focus=plan.focus,
+            checks=[{"question": c.question, "topic": c.topic, "omen": c.omen} for c in plan.checks],
         )

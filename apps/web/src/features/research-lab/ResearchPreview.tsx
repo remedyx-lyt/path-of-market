@@ -1,11 +1,12 @@
 import { OMENS } from './researchDraft'
 import type { ResearchDraft } from './researchDraft'
-import type { ResearchReport as Report } from '../../api/research'
+import type { ResearchJob, ResearchReport as Report } from '../../api/research'
+import { ActivityPanel } from './ActivityPanel'
 import { ResearchReport } from './ResearchReport'
 
-type Props = { draft: ResearchDraft | null; report: Report | null; isGenerating: boolean; hasError: boolean }
+type Props = { draft: ResearchDraft | null; report: Report | null; isGenerating: boolean; hasError: boolean; job?: ResearchJob | null }
 
-export function ResearchPreview({ draft, report, isGenerating, hasError }: Props) {
+export function ResearchPreview({ draft, report, isGenerating, hasError, job }: Props) {
   const status = isGenerating ? '正在获取报告' : hasError ? '生成失败' : report ? '报告已返回' : draft ? '任务已预览' : '等待输入'
   return (
     <aside className={`research-preview${report ? ' research-preview--report' : ''}${report?.mode === 'agent' ? ' research-preview--agent' : ''}`} aria-label={report ? report.mode === 'agent' ? '真实研究报告' : report.mode === 'model' ? '模型分析报告' : '演示研究报告' : '研究任务预览'} aria-busy={isGenerating}>
@@ -16,7 +17,8 @@ export function ResearchPreview({ draft, report, isGenerating, hasError }: Props
           {status}
         </span>
       </div>
-      {report ? <ResearchReport report={report} /> : <>
+      {report && job?.events.length ? <details className="activity-replay"><summary>研究过程回放 · {job.modelCalls} 次模型调用</summary><ActivityPanel job={job} live={false} /></details> : null}
+      {report ? <ResearchReport report={report} /> : job?.events.length ? <><h2>{job.target}</h2><ActivityPanel job={job} live={isGenerating} /></> : <>
       <h2>这次研究，<br />关注什么？</h2>
       <dl className="preview-fields">
         <div>

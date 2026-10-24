@@ -248,7 +248,7 @@ export function ResearchWorkspace() {
           <p className="form-message" role="status">{message || (isGenerating ? '正在等待研究服务返回报告。' : '可先预览任务，也可以直接生成报告。')}</p>
         </form>
       </section>
-      <ResearchPreview draft={preview} report={report} isGenerating={isGenerating} hasError={!!requestError} />
+      <ResearchPreview draft={preview} report={report} isGenerating={isGenerating} hasError={!!requestError} job={mode === 'agent' ? job : null} />
     </div>
   )
 }
