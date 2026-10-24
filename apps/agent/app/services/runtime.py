@@ -10,7 +10,8 @@ class RunLimits:
     max_model_calls: int = 72
     max_tokens: int = 1_200_000
     max_seconds: float = 1200
-    max_context_characters: int = 160000
+    # 程序自设的单次请求文字上限（不是模型窗口；deepseek-flash 窗口 100 万 token）。2026-10-24 用户要求由 16 万翻倍。
+    max_context_characters: int = 320000
     # 决策上下文超过 max_context_characters - context_reserve_characters 时停止取证、转入写作（参照 Pi 的 reserveTokens）；
     # 预留量要容纳写作规则与一次工具结果，避免写作请求本身越过上限。
     context_reserve_characters: int = 32000
