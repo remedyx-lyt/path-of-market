@@ -231,6 +231,10 @@ button:disabled { opacity: 0.55; cursor: wait; }
 .business-legend strong { margin-left: auto; font-variant-numeric: tabular-nums; }
 .business-table td { white-space: nowrap; }
 .business-chart svg text { fill: #3f493c; }
+.chart-plot-scroll { max-width: 100%; overflow-x: auto; }
+.report-chart-options { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 18px; color: #657457; font-size: 12px; cursor: pointer; }
+.report-chart-options input { width: 15px; height: 15px; margin: 0; accent-color: #252e20; }
+.financial-chart svg .chart-data-label { font: 600 16px Consolas, monospace; fill: #283023; stroke: #fff; stroke-width: 3px; paint-order: stroke; stroke-linejoin: round; font-variant-numeric: tabular-nums; }
 .business-table a { color: #4d725b; text-decoration: underline; }
 .evidence-diagram { margin: 26px 0 12px; padding: 18px 0; border-top: 1px solid #d4dace; border-bottom: 1px solid #d4dace; }
 .evidence-diagram figcaption { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; font-weight: 650; line-height: 1.8; }
@@ -248,3 +252,4 @@ button:disabled { opacity: 0.55; cursor: wait; }
 .method-usage p { margin: 6px 0 12px; }
 .method-usage li { margin: 12px 0; }
 @media (max-width: 600px) { .evidence-diagram ol { grid-template-columns: 1fr; } .evidence-diagram figcaption { flex-direction: column; } }
+@media (max-width: 500px) { .chart-plot-scroll svg { min-width: 360px; } }

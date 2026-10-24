@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { ResearchReport as Report } from '../../api/research'
 import { OMENS } from './researchDraft'
 import type { AgentResearchReport } from '../../api/research'
@@ -46,6 +47,7 @@ export function ResearchReport({ report }: { report: Report }) {
 }
 
 function AgentReportView({ report }: { report: AgentResearchReport }) {
+  const [showDataLabels,setShowDataLabels] = useState(true)
   const labels: Record<string, string> = { find_documents: '查找报告', read_document: '阅读与回查', get_market_data: '查询行情', inspect_document_pages:'检查PDF原页', read_research_skill:'读取研究方法',extract_report_data:'提取业务与财务数据' }
   const placedFigures = report.figurePlan?.some((f) => f.financialChartIds.length || f.businessDatasetIds.length || f.diagram)
   return <>
@@ -56,6 +58,9 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
       {!placedFigures && report.financialData?.datasets.length ? <a href="#financial-analysis">财务表图</a> : null}
       {report.sections.map((s,i) => <a key={i} href={`#analysis-${i}`}>{s.heading.replace(/^[一二三四五六七八九十]+[、.．]\s*/, '')}</a>)}
     </nav>
+    <label className="report-chart-options" title="控制财务柱状图、折线图和业务堆叠图上的数值">
+      <input type="checkbox" checked={showDataLabels} onChange={(event) => setShowDataLabels(event.target.checked)} aria-label="显示图表数据标签" />显示数据标签
+    </label>
     <details className="report-task">
       <summary>研究任务与执行记录</summary>
       <dl className="preview-fields">
@@ -71,14 +76,14 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
       </dl>
     </details>
     {report.methodUsage && <details className="method-usage"><summary>研究主线与方法</summary><p>{report.methodUsage.plan.focus}</p><ul>{report.methodUsage.plan.checks.map((c,i) => <li key={i}><strong>{c.question}</strong><p>{c.evidenceNeeded}</p></li>)}</ul><p>本轮读取 {report.methodUsage.references.length} 份相关原版方法，{report.methodUsage.reviewed ? '已结合方法计划复核报告' : '已形成计划，尚未完成报告复核'}；方法阅读与模型复核不等于独立事实审计。</p>{report.methodUsage.plan.unavailable.map((s,i) => <p key={i}>{s}</p>)}</details>}
-    {!placedFigures && report.financialData && <FinancialCharts data={report.financialData} sources={report.sources} />}
+    {!placedFigures && report.financialData && <FinancialCharts data={report.financialData} sources={report.sources} showDataLabels={showDataLabels} />}
     {report.marketData && <MarketChart data={report.marketData} />}
     <div className="report-sections">
       {report.sections.map((section, i) => <section className="report-section" id={`analysis-${i}`} key={`${i}-${section.heading}`}>
         <h3>{section.heading}</h3><ReportText text={section.content} />
         {placedFigures && report.figurePlan?.filter((f) => f.sectionIndex===i).map((f) => <div className="section-visuals" key={i}>
-          {report.businessData && f.businessDatasetIds.length>0 && <BusinessCharts data={report.businessData} sources={report.sources} ids={f.businessDatasetIds} />}
-          {report.financialData && f.financialChartIds.length>0 && <FinancialCharts data={report.financialData} sources={report.sources} chartIds={f.financialChartIds} />}
+          {report.businessData && f.businessDatasetIds.length>0 && <BusinessCharts data={report.businessData} sources={report.sources} ids={f.businessDatasetIds} showDataLabels={showDataLabels} />}
+          {report.financialData && f.financialChartIds.length>0 && <FinancialCharts data={report.financialData} sources={report.sources} chartIds={f.financialChartIds} showDataLabels={showDataLabels} />}
           {f.diagram && <EvidenceDiagram diagram={f.diagram} sources={report.sources} />}
         </div>)}
         <div className="section-citations">{section.citations.map((citation, j) => {
