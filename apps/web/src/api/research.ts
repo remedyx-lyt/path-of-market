@@ -37,14 +37,26 @@ export type FinancialRow = {
 }
 export type FinancialData = {
   schemaVersion: 1; datasets: { id: string; label: string; rows: FinancialRow[] }[]
-  charts: { id: string; datasetId: string; title: string; type: 'bar' | 'line'; keys: string[]; valueKind: 'amount' | 'yoy' | 'ratio'; unit: string }[]
+  charts: { id: string; datasetId: string; title: string; type: 'bar' | 'line'; keys: string[]; valueKind: 'amount' | 'yoy' | 'ratio'; unit: string; topic?: string }[]
   labels: Record<string, string>; gaps: string[]; method: string
 }
+export type SectionDiagram = { kind: 'flow' | 'cards'; title: string; nodes: { label: string; detail: string; citations: { sourceId: string; page?: number | null }[] }[] }
+export type BusinessData = {
+  schemaVersion: 1; method: string; gaps: string[]
+  datasets: { id: string; dimension: string; period: string; label: string; rows: {
+    year: number; periodLabel: string; total: number; totalEvidence: FinancialRow['evidence'][string]
+    items: { label: string; value: number; share: number; derived: boolean; sourceId?: string; page?: number; rawValue?: string; unit?: string; quote?: string }[]
+  }[] }[]
+}
+export type FigurePlan = { sectionIndex: number; financialChartIds: string[]; businessDatasetIds: string[]; diagram: SectionDiagram | null; gap: string | null }
 export type AgentResearchReport = ResearchDraft & {
   mode: 'agent'; isMock: false; asOfDate: string; evidenceStatus: 'retrieved' | 'partial'; title: string; summary: string
-  sections: { heading: string; content: string; citations: { sourceId: string; page?: number | null }[] }[]
+  sections: { heading: string; content: string; topics?: string[]; citations: { sourceId: string; page?: number | null }[] }[]
   sources: EvidenceSource[]; coverage: ReadCoverage[]; marketData: MarketData | null; limitations: string[]
   financialData?: FinancialData | null
+  businessData?: BusinessData
+  figurePlan?: FigurePlan[]
+  methodUsage?: { status: string; reviewed: boolean; references: { reference: string; characters: number; sha256: string }[]; plan: { focus: string; checks: { topic: string; question: string; evidenceNeeded: string; figureIdea: string; methodReference: string }[]; unavailable: string[] } } | null
   researchSkill?: { name: string; version: string; upstream: string }
   visualReadings?: { sourceId: string; pages: number[]; origin: string; cacheReused: boolean; observations: { page: number; summary: string; uncertainties: string[] }[] }[]
   toolCalls: { toolCallId: string; name: string; status: string; errorCode?: string }[]
@@ -219,6 +231,16 @@ export function isAgentReport(value: unknown): value is AgentResearchReport {
       || !Array.isArray(data.sourceUrls) || !data.sourceUrls.every((u) => typeof u === 'string' && u.startsWith('https://'))) return false
   }
   if (value.financialData != null && !validFinancialData(value.financialData, value.sources as EvidenceSource[])) return false
+  if (value.businessData != null && !validBusinessData(value.businessData, value.sources as EvidenceSource[])) return false
+  if (value.figurePlan != null && !validFigurePlan(value)) return false
+  if (value.methodUsage != null) {
+    const m = value.methodUsage
+    if (!isObject(m) || typeof m.status!=='string' || typeof m.reviewed!=='boolean' || !Array.isArray(m.references)
+      || !m.references.every((r) => isObject(r) && typeof r.reference==='string' && typeof r.characters==='number' && typeof r.sha256==='string')
+      || !isObject(m.plan) || typeof m.plan.focus!=='string' || !Array.isArray(m.plan.checks)
+      || !m.plan.checks.every((c) => isObject(c) && ['topic','question','evidenceNeeded','figureIdea','methodReference'].every((k) => typeof c[k]==='string'))
+      || !Array.isArray(m.plan.unavailable) || !m.plan.unavailable.every((s) => typeof s==='string')) return false
+  }
   if (value.researchSkill != null && (!isObject(value.researchSkill) || !['name','version','upstream'].every((k) => typeof (value.researchSkill as Record<string,unknown>)[k] === 'string'))) return false
   if (value.visualReadings != null && (!Array.isArray(value.visualReadings) || !value.visualReadings.every((r) => isObject(r)
     && typeof r.sourceId === 'string' && Array.isArray(r.pages) && r.pages.every((p) => Number.isInteger(p) && Number(p) > 0)
@@ -228,7 +250,9 @@ export function isAgentReport(value: unknown): value is AgentResearchReport {
 }
 
 function validFinancialData(data: unknown, sources: EvidenceSource[]): data is FinancialData {
-  const keys = new Set(['revenue','netProfit','recurringProfit','operatingCashFlow','totalAssets','netAssets','rdExpense','attributableMargin'])
+  const derived = new Set(['attributableMargin','grossMargin','liabilityRatio','rdExpenseRatio','rdInvestmentRatio'])
+  const keys = new Set(['revenue','netProfit','recurringProfit','operatingCashFlow','totalAssets','netAssets','rdExpense',
+    'operatingCost','totalLiabilities','cash','receivables','inventory','rdInvestment',...derived])
   if (!isObject(data) || data.schemaVersion !== 1 || !Array.isArray(data.datasets) || data.datasets.length > 4
     || !isObject(data.labels) || !Object.values(data.labels).every((s) => typeof s === 'string')
     || typeof data.method !== 'string' || !Array.isArray(data.gaps) || !data.gaps.every((g) => typeof g === 'string')) return false
@@ -248,13 +272,61 @@ function validFinancialData(data: unknown, sources: EvidenceSource[]): data is F
       if (!Object.entries(row.evidence).every(([k,e]) => keys.has(k) && isObject(e) && Number.isInteger(e.page) && Number(e.page) > 0
         && typeof e.rawValue === 'string' && ['元','万元','亿元'].includes(String(e.unit)) && typeof e.verification === 'string'
         && sources.some((s) => s.kind === 'document' && s.sourceId === e.sourceId && Number(e.page) <= Number(s.pageCount)))) return false
-      if (!Object.keys(row.values).every((k) => k === 'attributableMargin' || Object.hasOwn(row.evidence as object,k))) return false
+      if (!Object.keys(row.values).every((k) => derived.has(k) || Object.hasOwn(row.evidence as object,k))) return false
     }
   }
-  return Array.isArray(data.charts) && data.charts.length <= 16 && data.charts.every((c) => isObject(c) && typeof c.id === 'string'
+  return Array.isArray(data.charts) && data.charts.length <= 36 && data.charts.every((c) => isObject(c) && typeof c.id === 'string'
     && typeof c.title === 'string' && ids.has(String(c.datasetId)) && ['bar','line'].includes(String(c.type))
     && ['amount','yoy','ratio'].includes(String(c.valueKind)) && ['亿元','%'].includes(String(c.unit))
     && Array.isArray(c.keys) && c.keys.length > 0 && c.keys.length <= 3 && c.keys.every((k) => typeof k === 'string' && keys.has(k)))
+}
+
+function validBusinessData(data: unknown, sources: EvidenceSource[]): data is BusinessData {
+  const validEvidence = (e: unknown) => isObject(e) && typeof e.sourceId==='string' && Number.isInteger(e.page) && Number(e.page)>0
+    && sources.some((s) => s.kind==='document' && s.sourceId===e.sourceId && Number(e.page)<=Number(s.pageCount))
+  const number = (v: unknown): v is number => typeof v==='number' && Number.isFinite(v) && v>=0
+  if (!isObject(data) || data.schemaVersion!==1 || typeof data.method!=='string' || !Array.isArray(data.gaps) || !data.gaps.every((g) => typeof g==='string')
+    || !Array.isArray(data.datasets) || data.datasets.length>12) return false
+  const ids = new Set<string>()
+  return data.datasets.every((d) => {
+    if (!isObject(d) || typeof d.id!=='string' || ids.has(d.id) || typeof d.label!=='string'
+      || !['product','geography','industry'].includes(String(d.dimension)) || !['annual','h1','q1','q3'].includes(String(d.period))
+      || !Array.isArray(d.rows) || d.rows.length<1 || d.rows.length>3) return false
+    ids.add(d.id)
+    let year = 0
+    return d.rows.every((r) => {
+      if (!isObject(r) || typeof r.year!=='number' || !Number.isInteger(r.year) || r.year<=year || typeof r.periodLabel!=='string'
+        || !number(r.total) || r.total===0 || !validEvidence(r.totalEvidence) || !Array.isArray(r.items) || r.items.length<2 || r.items.length>30) return false
+      year=r.year
+      const labels = new Set<string>()
+      let sum = 0
+      return r.items.every((p) => {
+        if (!isObject(p) || typeof p.label!=='string' || labels.has(p.label) || !number(p.value) || !number(p.share) || p.share>100.01
+          || typeof p.derived!=='boolean' || Math.abs(p.share-p.value/Number(r.total)*100)>.01 || !p.derived && !validEvidence(p)) return false
+        labels.add(p.label); sum+=p.value
+        return true
+      }) && Math.abs(sum-r.total)<=Math.max(.01,r.total*.0001)
+    })
+  })
+}
+
+function validFigurePlan(report: Record<string,unknown>): boolean {
+  if (!Array.isArray(report.figurePlan) || !Array.isArray(report.sections) || report.figurePlan.length!==report.sections.length) return false
+  const financial = report.financialData as FinancialData | undefined
+  const business = report.businessData as BusinessData | undefined
+  const sources = report.sources as EvidenceSource[]
+  const seen = new Set<string>()
+  return report.figurePlan.every((f,i) => {
+    if (!isObject(f) || f.sectionIndex!==i || !Array.isArray(f.financialChartIds) || !Array.isArray(f.businessDatasetIds)
+      || !f.financialChartIds.every((id) => financial?.charts.some((c) => c.id===id))
+      || !f.businessDatasetIds.every((id) => business?.datasets.some((d) => d.id===id))) return false
+    for (const id of [...f.financialChartIds,...f.businessDatasetIds]) { if (seen.has(String(id))) return false; seen.add(String(id)) }
+    const d=f.diagram
+    return d==null || isObject(d) && ['flow','cards'].includes(String(d.kind)) && typeof d.title==='string'
+      && Array.isArray(d.nodes) && d.nodes.length>=2 && d.nodes.length<=6 && d.nodes.every((n) => isObject(n) && typeof n.label==='string' && typeof n.detail==='string'
+        && Array.isArray(n.citations) && n.citations.length>0 && n.citations.every((c) => isObject(c) && sources.some((s) => s.sourceId===c.sourceId
+          && (s.kind==='market' || Number.isInteger(c.page) && Number(c.page)>0 && Number(c.page)<=Number(s.pageCount)))))
+  })
 }
 
 async function jobRequest(path: string, method: string, signal?: AbortSignal, body?: unknown): Promise<ResearchJob> {

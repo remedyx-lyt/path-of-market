@@ -114,7 +114,7 @@ class LoopChecks(unittest.IsolatedAsyncioTestCase):
             if message["role"] == "assistant" and message.get("tool_calls"):
                 ids = {c["id"] for c in message["tool_calls"]}
                 self.assertTrue(ids <= {m.get("tool_call_id") for m in runner.messages if m["role"] == "tool"})
-        self.assertEqual(len(declarations()), 5)
+        self.assertEqual(len(declarations()), 6)
 
     async def test_02_full_read_tracks_split_page_without_skipping(self):
         model = ScriptedModel()
@@ -285,7 +285,7 @@ class NativeProtocolChecks(unittest.IsolatedAsyncioTestCase):
         try:
             message, _ = await complete_turn(settings, [{"role": "user", "content": "test"}], tools=declarations(), json_mode=False)
             self.assertEqual(message["tool_calls"][0]["id"], "call_native")
-            self.assertEqual(len(state["payload"]["tools"]), 5)
+            self.assertEqual(len(state["payload"]["tools"]), 6)
             self.assertEqual(state["payload"]["thinking"]["type"], "disabled")
             for mode in ["length", "duplicate"]:
                 state["mode"] = mode

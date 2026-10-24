@@ -4,16 +4,18 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import re
 from hashlib import sha256
 import time
 from uuid import uuid4
 
-from app.core.agent_prompts import READ_SYSTEM, REVIEW_SYSTEM, VISION_SYSTEM, initial_messages
-from app.core.research_skills import SkillArguments, load_research_skill, read_reference
+from app.core.agent_prompts import READ_SYSTEM, REVIEW_SYSTEM, VISION_SYSTEM, EXTRACT_SYSTEM, METHOD_SYSTEM, REPORT_SYSTEM, initial_messages
+from app.core.research_skills import SkillArguments, load_research_skill, load_method_bundle, read_reference
 from app.core.config import ModelServiceError
 from app.schemas.agent import AgentContent, AgentReadArguments, ReadingNote
-from app.schemas.financial import InspectArguments, VisualResult
+from app.schemas.financial import InspectArguments, VisualResult, ExtractArguments, ExtractResult, parse_extraction
 from app.services.financial_data import locate_summary_pages, verified_points, build_financial_data
+from app.services.report_figures import locate_detail_pages, verified_segments, build_business_data, plan_section_figures
 from app.services.model_client import complete_turn
 from app.tools.contracts import FindArguments, ToolError
 from app.tools.market import MarketArguments
@@ -27,7 +29,7 @@ class RunLimits:
     max_tokens: int = 1_200_000
     max_seconds: float = 1200
     max_context_characters: int = 160000
-    report_tokens: int = 6500
+    report_tokens: int = 14000
     read_characters: int = 26000
     max_visual_pages: int = 12
 
@@ -47,6 +49,7 @@ def declarations():
         ("get_market_data", "获取股票区间日线，返回不复权实际价格和后复权计算的变化/回撤/波动/月度表现。", MarketArguments),
         ("inspect_document_pages", "实际查看已发现PDF的1至3个物理页图片，理解图表/表格/扫描页并保留页码；不代替全本文字阅读。", InspectArguments),
         ("read_research_skill", "读取项目保留的Anthropic原版金融研究方法；catalog列目录，按需分页读取，不执行其脚本或专属工具。", SkillArguments),
+        ("extract_report_data", "从已通读PDF的1至4个物理页提取有原文依据的业务分部收入、研发、成本及资产负债数据，程序计算占比与趋势。", ExtractArguments),
     ]
     return [{"type": "function", "function": {"name": name, "description": description,
             "parameters": schema.model_json_schema(by_alias=True)}} for name, description, schema in specs]
@@ -74,6 +77,116 @@ class AgentRunner:
         self.financial_points = []
         self.financial_gaps = []
         self.financial_checked = set()
+        self.detail_checked = set()
+        self.segment_points = []
+        self.business_gaps = []
+        self.extraction_readings = []
+        self.method_usage = None
+
+    def financial_data(self):
+        return build_financial_data(self.financial_points,self.financial_gaps)
+
+    def business_data(self):
+        return build_business_data(self.segment_points,self.financial_data(),self.business_gaps)
+
+    async def prepare_methods(self):
+        if not self.job.request.include_financials:
+            return
+        references = load_method_bundle(self.job.request)
+        self.job.emit('methods_started','阅读相关原版金融方法，形成适合本次研究的方法计划')
+        messages = [{'role':'system','content':METHOD_SYSTEM},{'role':'user','content':json.dumps({
+            'task':self.job.request.model_dump(mode='json',by_alias=True),
+            'availableTools':[s['function']['name'] for s in declarations()],
+            'references':references},ensure_ascii=False)}]
+        for attempt in range(2):
+            message = await self.model(messages)
+            try:
+                plan = json.loads(message['content'])
+                paths = {r['reference'] for r in references}
+                assert isinstance(plan.get('focus'),str) and isinstance(plan.get('unavailable'),list)
+                assert 3 <= len(plan['checks']) <= 12
+                assert all(isinstance(c,dict) and c.get('methodReference') in paths and all(isinstance(c.get(k),str) for k in ['topic','question','evidenceNeeded','figureIdea']) for c in plan['checks'])
+                break
+            except (ValueError,KeyError,TypeError,AssertionError):
+                if attempt:
+                    raise ToolError('METHOD_PLAN_INVALID','研究方法计划格式无效，尚未开始事实分析。') from None
+                messages += [message,{'role':'user','content':'请修正为指定JSON结构，checks有3至12项，methodReference须是实际提供的文件路径。'}]
+        self.method_usage = {'status':'planned','references':[{k:v for k,v in r.items() if k!='content'} for r in references],
+                             'plan':plan,'reviewed':False}
+        self.messages.append({'role':'user','content':json.dumps({'type':'research_method_plan',**self.method_usage,
+            'instruction':'围绕计划主动取证、分析和选图，可依据新证据调整；缺数据明确说明，不机械执行固定配额。'},ensure_ascii=False)})
+        self.job.emit('methods_planned',f'已完整读取{len(references)}份相关原版方法并形成研究计划',references=[r['reference'] for r in references])
+
+    async def extract(self, arguments, *, origin='model_tool'):
+        args = ExtractArguments.model_validate(arguments)
+        if not self.coverage.get(args.document_id,{}).get('textComplete'):
+            raise ToolError('FULL_READING_REQUIRED','先完整阅读资料，再回查取数；指定页提取不能代替全文阅读。')
+        metadata,pages = await asyncio.to_thread(self.tools.store.loaded,args.document_id)
+        if metadata['publishedAt'] > self.job.request.as_of_date.isoformat():
+            raise ToolError('AFTER_RESEARCH_CUTOFF','资料晚于研究截止日。')
+        if len(set(args.pages)) != len(args.pages) or any(p > len(pages) for p in args.pages):
+            raise ToolError('PAGE_OUT_OF_RANGE','取数页码重复或超出资料范围。')
+        payload, texts, units = [],{},{}
+        for number in args.pages:
+            text = pages[number-1]['text']
+            # 同一页可能开始母公司报表，模型不可把它与此前合并口径混用。
+            text = re.split(r'2[、．.]\s*母公司资产负债表|4[、．.]\s*母公司利润表',text)[0]
+            texts[number] = text
+            for prior in reversed(pages[max(0,number-4):number]):
+                candidate = text if prior['page']==number else prior['text']
+                hit = re.search(r'单位\s*[:：]\s*(?:人民币)?(亿元|万元|元)',candidate)
+                if hit:
+                    units[number] = {'unit':hit[1],'page':prior['page'],'quote':hit[0]}
+                    break
+            payload.append({'page':number,'text':text,'unitContext':units.get(number)})
+        task = {'document':{k:metadata[k] for k in ['documentId','fiscalYear','reportType']},'focus':args.focus,'pages':payload}
+        key = sha256(json.dumps({'task':task,'system':EXTRACT_SYSTEM,'model':self.settings.model,'baseUrl':self.settings.base_url},ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+        cache = self.tools.store.root/'data-notes'/(key+'.json')
+        parsed,origin_run = None,None
+        if cache.exists():
+            try:
+                saved = json.loads(cache.read_text(encoding='utf-8'))
+                parsed = ExtractResult.model_validate(saved['result']); origin_run = saved['runId']
+            except (ValueError,KeyError,OSError): pass
+        if parsed is None:
+            messages = [{'role':'system','content':EXTRACT_SYSTEM},{'role':'user','content':json.dumps(task,ensure_ascii=False)}]
+            for attempt in range(2):
+                message = await self.model(messages)
+                try:
+                    parsed = parse_extraction(message['content'])
+                    break
+                except ValueError as error:
+                    write_json(self.tools.store.root/'data-errors'/(key+f'-{attempt}.json'),
+                               {'response':message['content'],'error':str(error)[:1200],'runId':self.job.task_id})
+                    if attempt: raise ToolError('DATA_EXTRACTION_INVALID','正文取数未通过格式校验，未计入底稿。') from None
+                    messages += [message,{'role':'user','content':'按financialPoints、segmentPoints、gaps结构修正，不推算，quote只保留含指标行与数值的短连续原文。格式问题：'+str(error)[:700]}]
+            write_json(cache,{'result':parsed.model_dump(by_alias=True),'runId':self.job.task_id})
+        # 文本路径必须提供逐字引文；旧视觉路径不受此约束。
+        missing = [p for p in parsed.financial_points if not p.quote]
+        parsed.financial_points = [p for p in parsed.financial_points if p.quote]
+        points,gaps = verified_points(parsed,metadata,texts,units)
+        segments,segment_gaps = verified_segments(parsed,metadata,texts)
+        self.financial_points += points; self.financial_gaps += gaps
+        self.segment_points += segments; self.business_gaps += segment_gaps+parsed.gaps
+        if missing: self.financial_gaps.append('正文取数缺少连续原文引文的数值已排除。')
+        record = {'sourceId':args.document_id,'pages':sorted(args.pages),'origin':origin,'cacheReused':origin_run is not None,
+                  'originRunId':origin_run or self.job.task_id,'verifiedPointCount':len(points),'segmentPointCount':len(segments)}
+        self.extraction_readings.append(record)
+        self.job.emit('data_extracted',f'正文取数完成：{len(points)}个财务值、{len(segments)}个业务收入值',**record)
+        return {**record,'financialData':self.financial_data(),'businessData':self.business_data()}
+
+    async def detail_data(self, identifier):
+        if not self.job.request.include_financials or identifier in self.detail_checked:
+            return
+        self.detail_checked.add(identifier)
+        metadata,pages = await asyncio.to_thread(self.tools.store.loaded,identifier)
+        selected = locate_detail_pages(pages)
+        for start in range(0,len(selected),2):
+            try:
+                await self.extract({'documentId':identifier,'pages':selected[start:start+2]},origin='automatic_detail_extraction')
+            except ToolError as error:
+                self.business_gaps.append(metadata['title']+'：'+error.message)
+                self.job.emit('data_gap',error.message,sourceId=identifier)
 
     def check_budget(self):
         if self.job.cancel_requested:
@@ -85,7 +198,7 @@ class AgentRunner:
         if self.job.usage.get("total_tokens", 0) >= self.limits.max_tokens:
             raise BudgetStop("token_budget")
 
-    async def model(self, messages, *, tool_specs=None, reading=False, visual=False):
+    async def model(self, messages, *, tool_specs=None, reading=False, visual=False, report=False):
         self.check_budget()
         # 图片字节单独由渲染器限制，不能把base64当文字上下文；图片仍计入供应商实际用量。
         projected = [{**m, 'content': [{'type':'image_url'} if p.get('type')=='image_url' else p for p in m['content']]
@@ -94,10 +207,15 @@ class AgentRunner:
             raise BudgetStop("context_budget")
         self.job.model_calls += 1
         self.job.emit("model_started", "查看PDF原页图像" if visual else "阅读原文" if reading else "判断下一步研究动作", modelCall=self.job.model_calls)
-        output_tokens = min(1800, self.settings.max_tokens) if reading else self.limits.report_tokens
+        output_tokens = min(1800, self.settings.max_tokens) if reading else self.limits.report_tokens if report else 6500
         # 累计预算以供应商实际用量记账，下一调用前检查；单次也有明确输出/时间上限。
-        message, usage = await self.completion(self.settings, messages, tools=tool_specs,
-                                               max_tokens=output_tokens, json_mode=not bool(tool_specs))
+        try:
+            message, usage = await self.completion(self.settings, messages, tools=tool_specs,
+                                                   max_tokens=output_tokens, json_mode=not bool(tool_specs))
+        except ModelServiceError as error:
+            for key,value in getattr(error,'usage',{}).items():
+                self.job.usage[key]=self.job.usage.get(key,0)+value
+            raise
         for key, value in usage.items():
             self.job.usage[key] = self.job.usage.get(key, 0) + value
         if "total_tokens" not in usage and "prompt_tokens" in usage and "completion_tokens" in usage:
@@ -153,6 +271,8 @@ class AgentRunner:
                     messages += [message, {'role':'user','content':'请严格按JSON结构和输入物理页码修正；未看清数值可省略。'}]
             write_json(cache, {'result':parsed.model_dump(by_alias=True),'runId':self.job.task_id,'processedAt':now()})
         points, gaps = verified_points(parsed, rendered['document'], {p['page']:p['text'] for p in rendered['pages']})
+        for point in points:
+            point['verificationOrigin']=origin
         self.financial_points.extend(points); self.financial_gaps.extend(gaps)
         record = {'sourceId':identifier,'pages':sorted(args.pages),'origin':origin,'model':self.settings.model,
                   'processedAt':now(),'cacheReused':origin_run is not None,'originRunId':origin_run or self.job.task_id,
@@ -217,8 +337,9 @@ class AgentRunner:
             return await self.raw_tool("search_document", {"documentId": identifier, "query": args.query})
         if self.coverage[identifier]["textComplete"]:
             await self.financial_summary(identifier)
+            await self.detail_data(identifier)
             return {"sourceId": identifier, "notes": self.notes[identifier], "coverage": self.coverage[identifier], "cacheHit": True,
-                    'financialData':build_financial_data(self.financial_points,self.financial_gaps)}
+                    'financialData':self.financial_data(),'businessData':self.business_data()}
         # 失败后的补读从已处理游标接续；不把先前只返回但模型失败的批次算成已读。
         cursor = self.coverage[identifier].get("nextCursor", {"startPage": 1, "offset": 0})
         self.notes.setdefault(identifier, [])
@@ -279,11 +400,15 @@ class AgentRunner:
             self.job.emit("reading_processed", f"{metadata['title']}：已处理 {len(progress['processedPages'])}/{progress['pageCount']} 页文本",
                           sourceId=identifier)
         await self.financial_summary(identifier)
+        await self.detail_data(identifier)
         return {"sourceId": identifier, "notes": self.notes[identifier], "coverage": self.coverage[identifier],
                 'financialData':build_financial_data(self.financial_points,self.financial_gaps),
+                'businessData':self.business_data(),
                 "limitations": ["文字与视觉覆盖分别记录；未列出的图片尚未理解。"]}
 
     async def dispatch(self, name, arguments):
+        if name == 'extract_report_data':
+            return await self.extract(arguments)
         if name == 'inspect_document_pages':
             return await self.inspect(arguments)
         if name == 'read_research_skill':
@@ -342,17 +467,31 @@ class AgentRunner:
             if not isinstance(data, dict):
                 continue
             data.pop('financialData', None)
+            data.pop('businessData', None)
             if data.get('notes'):
-                data['notes'] = [{'summary':n['summary'][:500], 'facts':[{'text':f['text'][:550], 'pages':f['pages']} for f in n['facts'][:3]],
+                data['notes'] = [{'summary':n['summary'][:240], 'facts':[{'text':f['text'][:320], 'pages':f['pages']} for f in n['facts'][:2]],
                                   'gaps':n['gaps']} for n in data['notes']]
                 data['contextProjection'] = '主循环为有限要点投影；完整批次记录保留，其他细节可按页回查。'
             message['content'] = json.dumps(body, ensure_ascii=False)
-        if self.financial_points or self.financial_gaps:
+        # 最近两次按页回查保留原文；更早结果保留来源和有限摘录，完整内容仍可回查。
+        page_results=[m for m in messages if m.get('role')=='tool' and '"text"' in m.get('content','')]
+        for message in page_results[:-2]:
+            body=json.loads(message['content']);data=body.get('data',{})
+            if isinstance(data.get('text'),str) and len(data['text'])>700:
+                data['text']=data['text'][:700]
+                data['contextProjection']='历史回查原文的有限摘录；完整页仍可通过read_document回查。'
+                message['content']=json.dumps(body,ensure_ascii=False)
+        if self.financial_points or self.financial_gaps or self.segment_points:
             data = build_financial_data(self.financial_points,self.financial_gaps)
+            business=self.business_data()
+            business['datasets']=[{**d,'rows':[{**r,'items':[{k:v for k,v in p.items() if k not in {'quote','publishedAt','verification'}} for p in r['items']]} for r in d['rows']]} for d in business['datasets']]
             state = {'type':'current_research_state', 'financialData':{k:data[k] for k in ['datasets','gaps','method']},
+                     'availableCharts':data['charts'], 'businessData':business,
                      'visualCoverage':[{'sourceId':r['sourceId'],'pages':r['pages']} for r in self.visual_readings],
-                     'note':'这是唯一当前财务底稿。程序据此绘图，主模型分析变化即可；Skill图表菜单不是全部取证的硬配额。'}
+                     'note':'这是唯一当前底稿。主动选择能说明问题的图，章节chartIds/businessIds引用这里的ID；不按配额凑图。'}
             messages.append({'role':'user','content':json.dumps(state,ensure_ascii=False)})
+        messages.append({'role':'user','content':json.dumps({'remainingDecisionSteps':max(0,self.limits.max_steps-self.steps),
+            'instruction':'优先用已取得的证据形成报告；只有会改变结论的缺口再补查，不为方法菜单穷尽所有指标。剩余轮数不足时明确局限并提交已有证据支持的最终报告。'},ensure_ascii=False)})
         return messages
 
     def validate_content(self, message):
@@ -378,6 +517,27 @@ class AgentRunner:
             source = self.sources.get(citation.source_id)
             if source is None or source["kind"] == "document" and (citation.page is None or citation.page not in self.coverage[citation.source_id]["processedPages"]):
                 raise ValueError("引用必须指向本次实际处理的来源和页码")
+        chart_ids = {c['id'] for c in self.financial_data()['charts']}
+        business_ids = {d['id'] for d in self.business_data()['datasets']}
+        if self.job.request.include_financials:
+            if chart_ids and not any(s.chart_ids for s in content.sections):
+                raise ValueError('已取得财务绘图数据，请主动选择支持论点的chartIds，不能全部闲置。')
+            if business_ids and not any(s.business_ids for s in content.sections):
+                raise ValueError('已取得业务收入结构，请主动选择相关businessIds；不能仅展示财务总览。')
+        used = set()
+        for section in content.sections:
+            if not set(section.chart_ids) <= chart_ids or not set(section.business_ids) <= business_ids:
+                raise ValueError('所选图表ID必须来自实际底稿。')
+            selected = set(section.chart_ids+section.business_ids)
+            if used & selected:
+                raise ValueError('同一图表放在最相关章节即可，不重复插入。')
+            used |= selected
+            if section.visual:
+                for node in section.visual.nodes:
+                    for citation in node.citations:
+                        source = self.sources.get(citation.source_id)
+                        if source is None or source['kind']=='document' and citation.page not in self.coverage[citation.source_id]['processedPages']:
+                            raise ValueError('定性图节点也须引用实际已读来源和页码。')
         return content
 
     async def review(self, content):
@@ -386,10 +546,21 @@ class AgentRunner:
                    "discoveredDocuments": list(self.discovered.values()), "processedSources": list(self.sources.values()),
                    "coverage": list(self.coverage.values()),
                    'financialData':build_financial_data(self.financial_points,self.financial_gaps),'visualReadings':self.visual_readings,
+                   'businessData':self.business_data(),'methodUsage':self.method_usage,
                    "market": {k: v for k, v in (self.market_data or {}).items() if k != "series"}}
         message = await self.model([{"role": "system", "content": REVIEW_SYSTEM},
-                                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}])
-        return self.validate_content(message)
+                                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],report=True)
+        revised = self.validate_content(message)
+        if self.method_usage:
+            self.method_usage.update(status='planned_and_reviewed',reviewed=True)
+        return revised
+
+    async def compose(self):
+        self.job.emit('report_drafting','根据已有证据和所选方法撰写图文报告')
+        messages=self.context()
+        messages[0]={'role':'system','content':REPORT_SYSTEM+'\n\n'+self.skill['instructions']}
+        messages.append({'role':'user','content':'取证阶段已结束。现在按完整报告JSON格式写作，自主选择有用的实际图表ID与有来源的定性图；不要返回ready。'})
+        return await self.model(messages,report=True)
 
     def report(self, content=None, reason="research_completed"):
         partial = reason != "research_completed"
@@ -411,12 +582,15 @@ class AgentRunner:
             limitations.append(self.current_period_gap)
         if partial:
             limitations.insert(0, "本次研究未完成：" + reason)
+        financial_data,business_data = self.financial_data(),self.business_data()
         return {**self.job.request.model_dump(mode="json", by_alias=True), **content,
                 "mode": "agent", "isMock": False, "evidenceStatus": "partial" if partial else "retrieved",
                 "sources": list(self.sources.values()), "toolCalls": self.job.tool_calls,
                 "coverage": list(self.coverage.values()), "marketData": self.market_data,
                 'financialData':build_financial_data(self.financial_points,self.financial_gaps) if self.job.request.include_financials or self.financial_points else None,
                 'visualReadings':self.visual_readings, 'researchSkill':{k:self.skill[k] for k in ['name','version','upstream']},
+                'businessData':business_data,'extractionReadings':self.extraction_readings,'methodUsage':self.method_usage,
+                'figurePlan':plan_section_figures(content['sections'],financial_data,business_data),
                 "limitations": limitations, "run": {"taskId": self.job.task_id, "sessionId": self.job.session_id,
                     "status": "partial" if partial else "completed", "startedAt": self.job.started_at, "finishedAt": now(),
                     "stopReason": reason, "model": self.settings.model, "modelCalls": self.job.model_calls,
@@ -428,6 +602,7 @@ class AgentRunner:
         invalid_finals = 0
         try:
             async with asyncio.timeout(self.limits.max_seconds):
+                await self.prepare_methods()
                 for self.steps in range(1, self.limits.max_steps + 1):
                     self.check_budget()
                     assistant = await self.model(self.context(), tool_specs=declarations())
@@ -436,6 +611,8 @@ class AgentRunner:
                     calls = assistant.get("tool_calls") or []
                     if not calls:
                         try:
+                            if json.loads(assistant.get('content') or '{}') == {'ready':True}:
+                                assistant=await self.compose()
                             content = self.validate_content(assistant)
                             content = await self.review(content)
                             self.job.report = self.report(content)
@@ -443,10 +620,16 @@ class AgentRunner:
                             self.job.emit("run_completed", "研究完成，报告与证据已返回")
                             return
                         except ValueError as error:
+                            diagnostics = '; '.join('.'.join(map(str,e['loc']))+': '+e['msg'] for e in error.errors()[:5]) if hasattr(error,'errors') else str(error)[:700]
+                            write_json(self.tools.store.root/'invalid-reports'/f'{self.job.task_id}-{self.steps}.json',
+                                       {'candidate':assistant.get('content'),'diagnostics':diagnostics})
+                            # 错误草稿不反复堆入主上下文；事实与完整来源仍保留。
+                            self.messages.pop()
                             invalid_finals += 1
+                            self.job.emit('report_validation_failed','报告需修正：'+diagnostics[:300])
                             if invalid_finals >= 3:
                                 raise BudgetStop("incomplete_evidence_or_report")
-                            self.messages.append({"role": "user", "content": "报告尚未通过程序核查：" + str(error)[:500] + "。请继续取得证据或修正 JSON 和引用。"})
+                            self.messages.append({"role": "user", "content": "报告尚未通过程序核查：" + diagnostics + "。请修正 JSON/引用或仅补关键证据，不重复穷尽取数。"})
                             continue
                     for call in calls:
                         self.check_budget()

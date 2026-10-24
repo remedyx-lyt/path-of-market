@@ -52,3 +52,29 @@ def load_research_skill():
             'upstreamContent': upstream_text, 'upstreamReference':original,
             'upstream': 'anthropics/financial-services@574ed3624aeb',
             'references': [p for p in catalog() if p.endswith('SKILL.md')]}
+
+
+def load_method_bundle(request):
+    """按任务挑方法；完整读取选中文件，不能把截断的前一万字当全本。"""
+    prefix = 'plugins/vertical-plugins/equity-research/skills/'
+    paths = [prefix+'initiating-coverage/references/task1-company-research.md',
+             prefix+'initiating-coverage/references/task4-chart-generation.md',
+             prefix+'initiating-coverage/assets/quality-checklist.md',
+             prefix+'thesis-tracker/SKILL.md']
+    question = request.question
+    if any(word in question for word in ['财务','业绩','经营','情况','年报','变化','季度']):
+        paths.append(prefix+'earnings-analysis/references/workflow.md')
+    if any(word in question for word in ['竞品','竞争','同行','行业对比']):
+        paths.append('plugins/vertical-plugins/financial-analysis/skills/competitive-analysis/references/frameworks.md')
+    references = []
+    for path in paths:
+        chunks,offset = [],0
+        while True:
+            part = read_reference({'reference':path,'offset':offset})
+            chunks.append(part['content'])
+            if part['nextOffset'] is None:
+                break
+            offset = part['nextOffset']
+        body = ''.join(chunks)
+        references.append({'reference':path,'characters':len(body),'sha256':catalog()[path]['sha256'],'content':body})
+    return references

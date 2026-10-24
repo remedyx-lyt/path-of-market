@@ -27,12 +27,29 @@ class Citation(BaseModel):
     page: int | None = Field(default=None, ge=1, strict=True)
 
 
+class DiagramNode(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    label: str = Field(min_length=1, max_length=40)
+    detail: str = Field(min_length=1, max_length=220)
+    citations: list[Citation] = Field(min_length=1, max_length=3)
+
+
+class SectionDiagram(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    kind: Literal['flow', 'cards']
+    title: str = Field(min_length=1, max_length=100)
+    nodes: list[DiagramNode] = Field(min_length=2, max_length=6)
+
+
 class AgentSection(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     heading: str = Field(min_length=1, max_length=120, strict=True)
     content: str = Field(min_length=1, max_length=10000, strict=True)
     citations: list[Citation] = Field(default_factory=list, max_length=12)
     topics: list[Literal['business', 'performance', 'profitability', 'cashflow', 'balance_sheet', 'research', 'risks']] = Field(default_factory=list, max_length=7)
+    visual: SectionDiagram | None = None
+    chart_ids: list[str] = Field(default_factory=list, alias='chartIds', max_length=8)
+    business_ids: list[str] = Field(default_factory=list, alias='businessIds', max_length=6)
 
 
 class AgentContent(BaseModel):

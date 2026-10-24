@@ -4,6 +4,7 @@ import type { AgentResearchReport } from '../../api/research'
 import { MarketChart } from './MarketChart'
 import { FinancialCharts } from './FinancialCharts'
 import { ReportText } from './ReportText'
+import { BusinessCharts, EvidenceDiagram } from './BusinessCharts'
 
 export function ResearchReport({ report }: { report: Report }) {
   if (report.mode === 'agent') return <AgentReportView report={report} />
@@ -45,13 +46,14 @@ export function ResearchReport({ report }: { report: Report }) {
 }
 
 function AgentReportView({ report }: { report: AgentResearchReport }) {
-  const labels: Record<string, string> = { find_documents: '查找报告', read_document: '阅读与回查', get_market_data: '查询行情', inspect_document_pages:'检查PDF原页', read_research_skill:'读取研究方法' }
+  const labels: Record<string, string> = { find_documents: '查找报告', read_document: '阅读与回查', get_market_data: '查询行情', inspect_document_pages:'检查PDF原页', read_research_skill:'读取研究方法',extract_report_data:'提取业务与财务数据' }
+  const placedFigures = report.figurePlan?.some((f) => f.financialChartIds.length || f.businessDatasetIds.length || f.diagram)
   return <>
     <span className="mock-badge">真实研究 · {report.run.status === 'completed' ? '已完成' : '部分结果'}</span>
     <h2 className="report-title">{report.title}</h2>
     <div className="report-summary"><ReportText text={report.summary} /></div>
     <nav className="report-nav" aria-label="报告目录">
-      {report.financialData?.datasets.length ? <a href="#financial-analysis">财务表图</a> : null}
+      {!placedFigures && report.financialData?.datasets.length ? <a href="#financial-analysis">财务表图</a> : null}
       {report.sections.map((s,i) => <a key={i} href={`#analysis-${i}`}>{s.heading.replace(/^[一二三四五六七八九十]+[、.．]\s*/, '')}</a>)}
     </nav>
     <details className="report-task">
@@ -68,11 +70,17 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
         <div><dt>任务编号</dt><dd>{report.run.taskId}</dd></div>
       </dl>
     </details>
-    {report.financialData && <FinancialCharts data={report.financialData} sources={report.sources} />}
+    {report.methodUsage && <details className="method-usage"><summary>研究主线与方法</summary><p>{report.methodUsage.plan.focus}</p><ul>{report.methodUsage.plan.checks.map((c,i) => <li key={i}><strong>{c.question}</strong><p>{c.evidenceNeeded}</p></li>)}</ul><p>本轮读取 {report.methodUsage.references.length} 份相关原版方法，{report.methodUsage.reviewed ? '已结合方法计划复核报告' : '已形成计划，尚未完成报告复核'}；方法阅读与模型复核不等于独立事实审计。</p>{report.methodUsage.plan.unavailable.map((s,i) => <p key={i}>{s}</p>)}</details>}
+    {!placedFigures && report.financialData && <FinancialCharts data={report.financialData} sources={report.sources} />}
     {report.marketData && <MarketChart data={report.marketData} />}
     <div className="report-sections">
       {report.sections.map((section, i) => <section className="report-section" id={`analysis-${i}`} key={`${i}-${section.heading}`}>
         <h3>{section.heading}</h3><ReportText text={section.content} />
+        {placedFigures && report.figurePlan?.filter((f) => f.sectionIndex===i).map((f) => <div className="section-visuals" key={i}>
+          {report.businessData && f.businessDatasetIds.length>0 && <BusinessCharts data={report.businessData} sources={report.sources} ids={f.businessDatasetIds} />}
+          {report.financialData && f.financialChartIds.length>0 && <FinancialCharts data={report.financialData} sources={report.sources} chartIds={f.financialChartIds} />}
+          {f.diagram && <EvidenceDiagram diagram={f.diagram} sources={report.sources} />}
+        </div>)}
         <div className="section-citations">{section.citations.map((citation, j) => {
           const source = report.sources.find((s) => s.sourceId === citation.sourceId)
           return source ? <a key={`${citation.sourceId}-${j}`} href={`${source.url}${citation.page ? `#page=${citation.page}` : ''}`} target="_blank" rel="noreferrer">
@@ -81,6 +89,7 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
         })}</div>
       </section>)}
     </div>
+    {placedFigures && <details className="financial-gaps"><summary>图表数据来源与取数限制</summary><p>{report.businessData?.method}</p>{[...new Set([...(report.financialData?.gaps || []),...(report.businessData?.gaps || [])])].map((g) => <p key={g}>{g}</p>)}</details>}
     {!!report.visualReadings?.length && <details className="visual-readings"><summary>PDF 原页视觉检查 · {new Set(report.visualReadings.flatMap((r) => r.pages.map((p) => `${r.sourceId}:${p}`))).size} 页</summary>
       {report.visualReadings.map((reading,i) => <div key={i}><strong>{report.sources.find((s) => s.sourceId===reading.sourceId)?.title}</strong><p>{reading.origin === 'automatic_financial_summary' ? '财务摘要自动检查' : '模型主动回查'}{reading.cacheReused ? ' · 复用已有视觉记录' : ''}</p>{reading.observations.map((o) => <p key={o.page}>PDF第{o.page}页：{o.summary}{o.uncertainties.length ? `；待核查：${o.uncertainties.join('；')}` : ''}</p>)}</div>)}
       <p>只检查以上页面，不能视为全本图片均已理解。</p>

@@ -222,3 +222,29 @@ button:disabled { opacity: 0.55; cursor: wait; }
 }
 @media (max-width: 1099px) { .financial-grid { grid-template-columns: 1fr; } }
 @media (max-width: 500px) { .report-section-heading { align-items: start; flex-direction: column; } .financial-table th, .financial-table td { padding-left: 6px; padding-right: 6px; } .financial-chart svg text { font-size: 20px; } }
+.section-figures { margin-top: 22px; padding: 18px 0 0; border-bottom: 0; }
+.section-visuals .financial-chart .chart-source, .section-visuals .financial-note { color: #737c69; font-size: 11px; line-height: 1.8; }
+.business-dataset { margin: 20px 0; }
+.business-legend { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 14px; font-size: 12px; }
+.business-legend > span { display: flex; align-items: center; gap: 8px; }
+.business-legend i { width: 9px; height: 9px; flex-shrink: 0; }
+.business-legend strong { margin-left: auto; font-variant-numeric: tabular-nums; }
+.business-table td { white-space: nowrap; }
+.business-chart svg text { fill: #3f493c; }
+.business-table a { color: #4d725b; text-decoration: underline; }
+.evidence-diagram { margin: 26px 0 12px; padding: 18px 0; border-top: 1px solid #d4dace; border-bottom: 1px solid #d4dace; }
+.evidence-diagram figcaption { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; font-weight: 650; line-height: 1.8; }
+.evidence-diagram figcaption > span { font-size: 10px; color: #75806c; font-weight: 400; white-space: nowrap; }
+.evidence-diagram ol { list-style: none; padding: 0; margin: 20px 0 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px 24px; }
+.evidence-diagram li { display: flex; gap: 12px; min-width: 0; }
+.diagram-index { color: #71927d; font: 14px Consolas,monospace; padding-top: 2px; }
+.evidence-diagram strong { font-size: 13px; }
+.research-preview--agent .evidence-diagram p { font-size: 12px; line-height: 1.8; margin: 7px 0; }
+.evidence-diagram .chart-source a { font-size: 10px; }
+.evidence-diagram.flow ol { grid-template-columns: 1fr; }
+.evidence-diagram.flow li + li { padding-top: 15px; border-top: 1px dashed #d4dace; }
+.method-usage { margin: 14px 0; border-bottom: 1px solid #dedfd7; font-size: 12px; color: #657457; line-height: 1.8; }
+.method-usage summary { padding: 15px 0; }
+.method-usage p { margin: 6px 0 12px; }
+.method-usage li { margin: 12px 0; }
+@media (max-width: 600px) { .evidence-diagram ol { grid-template-columns: 1fr; } .evidence-diagram figcaption { flex-direction: column; } }

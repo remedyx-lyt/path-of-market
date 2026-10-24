@@ -83,6 +83,7 @@ async def complete_turn(settings: ModelSettings, messages: list[dict], *, tools:
         payload.update(tools=tools, tool_choice="auto")
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
+    body, choice = None, None
     try:
         async with asyncio.timeout(settings.timeout_seconds):
             body = await asyncio.to_thread(_request_payload, settings, payload)
@@ -117,7 +118,12 @@ async def complete_turn(settings: ModelSettings, messages: list[dict], *, tools:
     except TimeoutError:
         raise ModelServiceError("MODEL_TIMEOUT", "模型响应超时，请重试或缩短问题。", 504) from None
     except (ValueError, KeyError, IndexError, TypeError, AttributeError):
-        raise ModelServiceError("MODEL_INVALID_RESPONSE", "模型未返回完整且有效的工具消息或内容。", 502) from None
+        error=ModelServiceError("MODEL_INVALID_RESPONSE", "模型未返回完整且有效的工具消息或内容。", 502)
+        error.finish_reason=choice.get('finish_reason') if isinstance(choice,dict) else None
+        raw_usage=body.get('usage',{}) if isinstance(body,dict) else {}
+        if not isinstance(raw_usage,dict): raw_usage={}
+        error.usage={k:v for k in ['prompt_tokens','completion_tokens','total_tokens'] if type(v:=raw_usage.get(k)) is int and v>=0}
+        raise error from None
 
 
 async def generate_content(settings: ModelSettings, messages: list[dict[str, str]]) -> tuple[ModelContent, dict[str, int]]:
