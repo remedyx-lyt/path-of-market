@@ -14,8 +14,12 @@ sections 包含 2 至 6 个章节，回答问题，并列出需要补充的数�
 
 
 def build_messages(request: ModelResearchRequest) -> list[dict[str, str]]:
-    task = {"研究对象": request.target, "研究问题": request.question,
-            "研究截止日期": request.as_of_date.isoformat(), "研究偏好": request.user_style or "未指定",
-            "研究预兆": [OMEN_NAMES[omen] for omen in request.omens], "已检索证据": []}
-    return [{"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(task, ensure_ascii=False)}]
+    task = {
+        "研究对象": request.target,
+        "研究问题": request.question,
+        "研究截止日期": request.as_of_date.isoformat(),
+        "研究偏好": request.user_style or "未指定",
+        "研究预兆": [OMEN_NAMES[omen] for omen in request.omens],
+        "已检索证据": [],
+    }
+    return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": json.dumps(task, ensure_ascii=False)}]

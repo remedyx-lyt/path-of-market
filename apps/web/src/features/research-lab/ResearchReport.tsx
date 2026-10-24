@@ -66,7 +66,9 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
       <dl className="preview-fields">
         <div><dt>研究对象 / 截止日期</dt><dd>{report.target} / {report.asOfDate}</dd></div>
         <div><dt>研究问题</dt><dd>{report.question}</dd></div>
+        <div><dt>研究预兆</dt><dd>{OMENS.filter((omen) => report.omens.includes(omen.value)).map((omen) => omen.name).join('、') || '未选择（按研究问题选择方法）'}</dd></div>
         <div><dt>执行情况</dt><dd>{report.run.modelCalls} 次模型调用 · {report.run.steps} 轮决策 · {report.run.stopReason}</dd></div>
+        <div><dt>模型用量</dt><dd>{usageText(report.run.usage)}</dd></div>
         <div><dt>资料阅读</dt><dd>{report.coverage.map((entry) => <p key={entry.sourceId}>
           {report.sources.find((s) => s.sourceId === entry.sourceId)?.title}：{entry.processedPages.length}/{entry.pageCount} 页文本
           {entry.textComplete ? '，文本阅读完成' : '，尚有未完成范围'}
@@ -75,12 +77,15 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
         <div><dt>任务编号</dt><dd>{report.run.taskId}</dd></div>
       </dl>
     </details>
-    {report.methodUsage && <details className="method-usage"><summary>研究主线与方法</summary><p>{report.methodUsage.plan.focus}</p><ul>{report.methodUsage.plan.checks.map((c,i) => <li key={i}><strong>{c.question}</strong><p>{c.evidenceNeeded}</p></li>)}</ul><p>本轮读取 {report.methodUsage.references.length} 份相关原版方法，{report.methodUsage.reviewed ? '已结合方法计划复核报告' : '已形成计划，尚未完成报告复核'}；方法阅读与模型复核不等于独立事实审计。</p>{report.methodUsage.plan.unavailable.map((s,i) => <p key={i}>{s}</p>)}</details>}
+    {!!report.omenCoverage?.length && <OmenCoveragePanel coverage={report.omenCoverage} />}
+    {report.methodUsage && <MethodUsagePanel usage={report.methodUsage} />}
     {!placedFigures && report.financialData && <FinancialCharts data={report.financialData} sources={report.sources} showDataLabels={showDataLabels} />}
     {report.marketData && <MarketChart data={report.marketData} />}
     <div className="report-sections">
       {report.sections.map((section, i) => <section className="report-section" id={`analysis-${i}`} key={`${i}-${section.heading}`}>
-        <h3>{section.heading}</h3><ReportText text={section.content} />
+        <h3>{section.heading}</h3>
+        {!!section.omens?.length && <p className="section-omens">{section.omens.map((id) => OMENS.find((o) => o.value === id)?.name || id).join(' · ')}</p>}
+        <ReportText text={section.content} />
         {placedFigures && report.figurePlan?.filter((f) => f.sectionIndex===i).map((f) => <div className="section-visuals" key={i}>
           {report.businessData && f.businessDatasetIds.length>0 && <BusinessCharts data={report.businessData} sources={report.sources} ids={f.businessDatasetIds} showDataLabels={showDataLabels} />}
           {report.financialData && f.financialChartIds.length>0 && <FinancialCharts data={report.financialData} sources={report.sources} chartIds={f.financialChartIds} showDataLabels={showDataLabels} />}
@@ -106,4 +111,44 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
     </section>
     <div className="report-limitations">{report.limitations.map((text) => <p key={text}>{text}</p>)}</div>
   </>
+}
+
+function usageText(usage: Record<string, number>) {
+  const total = usage.total_tokens ?? 0
+  const hit = usage.prompt_cache_hit_tokens
+  const miss = usage.prompt_cache_miss_tokens
+  if (typeof hit !== 'number' || typeof miss !== 'number' || hit + miss === 0) return `${total.toLocaleString()} tokens`
+  // DeepSeek 缓存命中部分约为未命中价格的 1/50，实际费用主要取决于未命中部分。
+  return `${total.toLocaleString()} tokens · 输入缓存命中 ${Math.round(hit / (hit + miss) * 100)}%（未命中 ${miss.toLocaleString()}）`
+}
+
+function skillName(path: string) {
+  return path.split('/skills/')[1]?.replace(/\/SKILL\.md$/, '').replace(/\.md$/, '') || path
+}
+
+function OmenCoveragePanel({ coverage }: { coverage: NonNullable<AgentResearchReport['omenCoverage']> }) {
+  return <details className="method-usage omen-coverage" open>
+    <summary>研究预兆覆盖 · {coverage.filter((c) => c.covered).length}/{coverage.length} 在现有工具范围内完成</summary>
+    {coverage.map((c) => <div key={c.omen}>
+      <strong>{c.name} · {c.covered ? '已覆盖' : '未完全覆盖'}</strong>
+      <p>专属章节：{c.sections.join('、') || '无'}；方法计划检查 {c.planChecks} 项；使用 Skill：{c.skillsRead.map(skillName).join('、') || '无'}</p>
+      {c.addressed.length > 0 && <p>已回答：{c.addressed.join('；')}</p>}
+      {c.missingItems.length > 0 && <p>未覆盖：{c.missingItems.join('；')}</p>}
+      {c.capabilityGaps.map((g) => <p key={g}>工具缺口：{g}</p>)}
+    </div>)}
+    <p>{coverage[0]?.verification}</p>
+  </details>
+}
+
+function MethodUsagePanel({ usage }: { usage: NonNullable<AgentResearchReport['methodUsage']> }) {
+  const extra = usage.onDemandReads?.length ? `；研究中另按需读取 ${usage.onDemandReads.map(skillName).join('、')}` : ''
+  return <details className="method-usage"><summary>研究主线与方法</summary>
+    {usage.plan ? <>
+      <p>{usage.plan.focus}</p>
+      <ul>{usage.plan.checks.map((c,i) => <li key={i}><strong>{c.question}</strong>{c.omen ? <span className="section-omens"> · {OMENS.find((o) => o.value === c.omen)?.name || c.omen}</span> : null}<p>{c.evidenceNeeded}</p></li>)}</ul>
+    </> : <p>本次方法计划未通过格式校验，研究按已加载的基础方法进行。</p>}
+    <ul>{usage.references.map((r) => <li key={r.reference}>{skillName(r.reference)}{r.selectedBecause?.length ? `（${r.selectedBecause.join('、')}）` : ''}</li>)}</ul>
+    <p>本轮读取 {usage.references.length} 份相关原版方法{usage.planCacheReused ? '（计划复用自先前相同任务）' : ''}{extra}，{usage.reviewed ? '已结合方法计划复核报告' : '已形成计划，尚未完成报告复核'}；方法阅读与模型复核不等于独立事实审计。</p>
+    {usage.plan?.unavailable.map((s,i) => <p key={i}>{s}</p>)}
+  </details>
 }

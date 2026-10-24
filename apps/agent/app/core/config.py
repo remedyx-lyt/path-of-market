@@ -14,6 +14,9 @@ class ModelServiceError(Exception):
         self.code, self.message, self.status = code, message, status
 
 
+DEFAULT_VISION_MODELS = ("deepseek-flash", "deepseek-v4-flash-vision-exp")
+
+
 @dataclass(frozen=True)
 class ModelSettings:
     api_key: str = field(repr=False)
@@ -21,6 +24,10 @@ class ModelSettings:
     model: str = "deepseek-flash"
     timeout_seconds: float = 60
     max_tokens: int = 1800
+    # 声明支持图片输入的模型；原页视觉工具只对这些模型开放。可用 DEEPSEEK_VISION_MODELS 逗号分隔覆盖。
+    vision_models: tuple[str, ...] = DEFAULT_VISION_MODELS
+    # 写作与复核一次输出整篇报告（多预兆时上万 token），比研究轮次慢得多；单独设等待上限，整个任务仍受总时间预算约束。
+    report_timeout_seconds: float = 180
 
 
 def load_model_settings() -> ModelSettings:
@@ -50,16 +57,28 @@ def load_model_settings() -> ModelSettings:
     try:
         base_url = setting("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
         url = urlsplit(base_url)
-        if (not url.hostname or url.username or url.password or url.query or url.fragment
+        if (
+            not url.hostname
+            or url.username
+            or url.password
+            or url.query
+            or url.fragment
             or any(char.isspace() or ord(char) < 32 for char in base_url)
-            or not (url.scheme == "https" or url.scheme == "http" and url.hostname in {"127.0.0.1", "localhost", "::1"})):
+            or not (url.scheme == "https" or url.scheme == "http" and url.hostname in {"127.0.0.1", "localhost", "::1"})
+        ):
             raise ValueError
         _ = url.port
         model = setting("DEEPSEEK_MODEL", "deepseek-flash")
         timeout = float(setting("LLM_TIMEOUT_SECONDS", "60"))
+        report_timeout = float(setting("LLM_REPORT_TIMEOUT_SECONDS", "180"))
         max_tokens = int(setting("LLM_MAX_TOKENS", "1800"))
-        if not model or len(model) > 120 or not 0 < timeout <= 60 or not 64 <= max_tokens <= 4096:
+        vision = tuple(v.strip() for v in setting("DEEPSEEK_VISION_MODELS", ",".join(DEFAULT_VISION_MODELS)).split(",") if v.strip())
+        if not vision or any(len(v) > 120 for v in vision):
+            raise ValueError
+        if not model or len(model) > 120 or not 0 < timeout <= 60 or not timeout <= report_timeout <= 600 or not 64 <= max_tokens <= 4096:
             raise ValueError
     except ValueError:
-        raise ModelServiceError("MODEL_CONFIG_ERROR", "模型配置无效，请检查地址、模型名称、等待上限（不超过 60 秒）和输出长度。") from None
-    return ModelSettings(key, base_url, model, timeout, max_tokens)
+        raise ModelServiceError(
+            "MODEL_CONFIG_ERROR", "模型配置无效，请检查地址、模型名称、等待上限（不超过 60 秒；报告写作不超过 600 秒）和输出长度。"
+        ) from None
+    return ModelSettings(key, base_url, model, timeout, max_tokens, vision, report_timeout)

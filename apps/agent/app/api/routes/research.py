@@ -5,8 +5,7 @@ from fastapi.responses import JSONResponse
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.schemas.research import (HealthResponse, MockResearchReport, ResearchRequest,
-                                  ModelResearchRequest, ModelResearchReport, ModelRun)
+from app.schemas.research import HealthResponse, MockResearchReport, ResearchRequest, ModelResearchRequest, ModelResearchReport, ModelRun
 from app.core.config import ModelServiceError, load_model_settings
 from app.core.prompts import build_messages
 from app.services.model_client import generate_content
@@ -39,16 +38,33 @@ async def research_model(request: ModelResearchRequest):
         content, usage = await generate_content(settings, build_messages(request))
         states.append("completed")
         return ModelResearchReport(
-            **request.model_dump(), **content.model_dump(),
-            limitations=["仅调用模型生成研究思路，尚未检索真实资料或验证最新事实。",
-                         "偏好和预兆影响本次关注点，资料工具与长期记忆尚未接入。"],
-            run=ModelRun(task_id=task_id, states=states, started_at=started_at,
-                         finished_at=datetime.now(timezone.utc).isoformat(), model=settings.model, usage=usage),
+            **request.model_dump(),
+            **content.model_dump(),
+            limitations=[
+                "仅调用模型生成研究思路，尚未检索真实资料或验证最新事实。",
+                "偏好和预兆影响本次关注点，资料工具与长期记忆尚未接入。",
+            ],
+            run=ModelRun(
+                task_id=task_id,
+                states=states,
+                started_at=started_at,
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                model=settings.model,
+                usage=usage,
+            ),
         )
     except ModelServiceError as error:
-        return JSONResponse(status_code=error.status, content={
-            "error": {"code": error.code, "message": error.message},
-            "run": {"taskId": task_id, "status": "failed", "states": states + ["failed"],
-                    "startedAt": started_at, "finishedAt": datetime.now(timezone.utc).isoformat(),
-                    "stopReason": error.code},
-        })
+        return JSONResponse(
+            status_code=error.status,
+            content={
+                "error": {"code": error.code, "message": error.message},
+                "run": {
+                    "taskId": task_id,
+                    "status": "failed",
+                    "states": states + ["failed"],
+                    "startedAt": started_at,
+                    "finishedAt": datetime.now(timezone.utc).isoformat(),
+                    "stopReason": error.code,
+                },
+            },
+        )

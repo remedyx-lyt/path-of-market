@@ -34,17 +34,11 @@ def build_mock_report(request: ResearchRequest) -> MockResearchReport:
             ),
             ReportSection(
                 heading="研究偏好与视角",
-                content=(
-                    f"研究偏好：{user_style}\n启用预兆：{omen_names}\n"
-                    "当前只展示收到的配置，尚未执行真实研究策略。"
-                ),
+                content=(f"研究偏好：{user_style}\n启用预兆：{omen_names}\n当前只展示收到的配置，尚未执行真实研究策略。"),
             ),
             ReportSection(
                 heading="后续资料与验证",
-                content=(
-                    "后续阶段将接入报告、公告和行情等资料工具。"
-                    "本次没有真实证据或工具调用，不能用于判断公司或市场情况。"
-                ),
+                content=("后续阶段将接入报告、公告和行情等资料工具。本次没有真实证据或工具调用，不能用于判断公司或市场情况。"),
             ),
         ],
     )

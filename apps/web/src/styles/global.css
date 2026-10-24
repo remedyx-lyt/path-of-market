@@ -253,3 +253,7 @@ button:disabled { opacity: 0.55; cursor: wait; }
 .method-usage li { margin: 12px 0; }
 @media (max-width: 600px) { .evidence-diagram ol { grid-template-columns: 1fr; } .evidence-diagram figcaption { flex-direction: column; } }
 @media (max-width: 500px) { .chart-plot-scroll svg { min-width: 360px; } }
+/* M1-4：预兆覆盖与章节预兆标记，沿用方法面板的克制样式 */
+.omen-coverage > div { margin: 12px 0; }
+.omen-coverage strong { font-size: 12px; color: #2b3326; }
+.section-omens { margin: -4px 0 10px; font-size: 11px; color: #657457; letter-spacing: 0; }

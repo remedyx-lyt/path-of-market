@@ -1,5 +1,10 @@
-import { OMENS } from '../features/research-lab/researchDraft'
+import { z } from 'zod'
 import type { DraftErrors, ReportOmen, ResearchDraft } from '../features/research-lab/researchDraft'
+import { agentReportSchema, errorBodySchema, jobSchema, mockReportSchema, modelReportSchema, validationIssueSchema } from './researchSchemas'
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 export type MockResearchReport = ResearchDraft & {
   mode: 'mock'
@@ -51,16 +56,26 @@ export type BusinessData = {
 export type FigurePlan = { sectionIndex: number; financialChartIds: string[]; businessDatasetIds: string[]; diagram: SectionDiagram | null; gap: string | null }
 export type AgentResearchReport = ResearchDraft & {
   mode: 'agent'; isMock: false; asOfDate: string; evidenceStatus: 'retrieved' | 'partial'; title: string; summary: string
-  sections: { heading: string; content: string; topics?: string[]; citations: { sourceId: string; page?: number | null }[] }[]
+  sections: { heading: string; content: string; topics?: string[]; omens?: ReportOmen[]; citations: { sourceId: string; page?: number | null }[] }[]
   sources: EvidenceSource[]; coverage: ReadCoverage[]; marketData: MarketData | null; limitations: string[]
   financialData?: FinancialData | null
   businessData?: BusinessData
   figurePlan?: FigurePlan[]
-  methodUsage?: { status: string; reviewed: boolean; references: { reference: string; characters: number; sha256: string }[]; plan: { focus: string; checks: { topic: string; question: string; evidenceNeeded: string; figureIdea: string; methodReference: string }[]; unavailable: string[] } } | null
+  methodUsage?: {
+    status: string; reviewed: boolean; planCacheReused?: boolean; onDemandReads?: string[]
+    references: { reference: string; characters: number; sha256: string; selectedBecause?: string[] }[]
+    plan: { focus: string; checks: { topic: string; question: string; evidenceNeeded: string; figureIdea: string; methodReference: string; omen?: string | null }[]; unavailable: string[] } | null
+  } | null
+  omenCoverage?: OmenCoverage[]
   researchSkill?: { name: string; version: string; upstream: string }
   visualReadings?: { sourceId: string; pages: number[]; origin: string; cacheReused: boolean; observations: { page: number; summary: string; uncertainties: string[] }[] }[]
   toolCalls: { toolCallId: string; name: string; status: string; errorCode?: string }[]
-  run: { taskId: string; sessionId: string; status: 'completed' | 'partial'; model: string; stopReason: string; modelCalls: number; steps: number; usage: Record<string, number> }
+  run: { taskId: string; sessionId: string; status: 'completed' | 'partial'; model: string; stopReason: string; modelCalls: number; steps: number; usage: Record<string, number>; reviewOutcome?: string | null }
+}
+/** 每个所选预兆的覆盖：程序核对章节标记与关键要素，内容充分性由模型自评；capabilityGaps 是当前工具拿不到的资料。 */
+export type OmenCoverage = {
+  omen: ReportOmen; name: string; covered: boolean; coverageScope: string; verification: string
+  sections: string[]; addressed: string[]; missingItems: string[]; capabilityGaps: string[]; skillsRead: string[]; planChecks: number
 }
 export type ResearchJob = {
   taskId: string; status: 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'; target: string
@@ -83,47 +98,26 @@ export class ResearchApiError extends Error {
   }
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+/** 运行时检查已确保报告与当前模式对应；返回原始响应，保留 schema 未列出的字段。 */
+export function isAgentReport(value: unknown): value is AgentResearchReport {
+  return agentReportSchema.safeParse(value).success
 }
 
-function isOmen(value: unknown): value is ReportOmen {
-  return OMENS.some((omen) => omen.value === value)
+function errorCode(body: unknown, fallback: string) {
+  const parsed = errorBodySchema.safeParse(body)
+  return parsed.success ? parsed.data.error.code : fallback
 }
 
-function isMockReport(value: unknown): value is MockResearchReport {
-  return isObject(value) && value.mode === 'mock' && value.isMock === true
-    && ['target', 'question', 'userStyle', 'title', 'summary'].every((key) => typeof value[key] === 'string')
-    && Array.isArray(value.omens) && value.omens.every(isOmen)
-    && Array.isArray(value.sections) && value.sections.length > 0
-    && value.sections.every((section) => isObject(section) && typeof section.heading === 'string' && typeof section.content === 'string')
-    && Array.isArray(value.sources) && value.sources.length === 0
-    && Array.isArray(value.toolCalls) && value.toolCalls.length === 0
-}
-
-function isModelReport(value: unknown): value is ModelResearchReport {
-  return isObject(value) && value.mode === 'model' && value.isMock === false
-    && value.evidenceStatus === 'not_retrieved' && typeof value.asOfDate === 'string'
-    && ['target', 'question', 'userStyle', 'title', 'summary'].every((key) => typeof value[key] === 'string')
-    && Array.isArray(value.omens) && value.omens.every(isOmen)
-    && Array.isArray(value.sections) && value.sections.length >= 2 && value.sections.length <= 6
-    && value.sections.every((section) => isObject(section) && typeof section.heading === 'string' && typeof section.content === 'string')
-    && Array.isArray(value.sources) && value.sources.length === 0
-    && Array.isArray(value.toolCalls) && value.toolCalls.length === 0
-    && Array.isArray(value.limitations) && value.limitations.length > 0 && value.limitations.every((item) => typeof item === 'string')
-    && isObject(value.run) && value.run.status === 'completed'
-    && ['taskId', 'model', 'startedAt', 'finishedAt'].every((key) => typeof (value.run as Record<string, unknown>)[key] === 'string')
-    && value.run.stopReason === 'model_response_received'
-    && Array.isArray(value.run.states) && value.run.states.every((state) => typeof state === 'string')
-}
-
-function validationErrors(body: Record<string, unknown>): DraftErrors {
+function validationErrors(body: unknown): DraftErrors {
   const errors: DraftErrors = {}
-  if (!Array.isArray(body.detail)) return errors
+  const detail = z.object({ detail: z.array(z.unknown()) }).safeParse(body)
+  if (!detail.success) return errors
   const labels = { target: '研究对象', question: '研究问题', userStyle: '研究偏好', omens: '研究预兆', asOfDate: '研究截止日期' }
   const limits = { target: 120, question: 2000, userStyle: 500 }
-  for (const issue of body.detail) {
-    if (!isObject(issue) || !Array.isArray(issue.loc)) continue
+  for (const entry of detail.data.detail) {
+    const parsed = validationIssueSchema.safeParse(entry)
+    if (!parsed.success) continue
+    const issue = parsed.data
     const field = issue.loc[1]
     if (typeof field !== 'string' || !Object.hasOwn(labels, field)) continue
     const key = field as keyof typeof labels
@@ -183,12 +177,12 @@ export async function generateReport(draft: ResearchDraft, signal: AbortSignal, 
       if (response.status === 422 && isObject(body)) {
         throw new ResearchApiError('输入校验未通过，请检查标出的内容后重试。', 'VALIDATION_ERROR', validationErrors(body))
       }
-      const code = isObject(body) && isObject(body.error) && typeof body.error.code === 'string' ? body.error.code : 'HTTP_ERROR'
+      const code = errorCode(body, 'HTTP_ERROR')
       const message = Object.hasOwn(ERROR_MESSAGES, code) ? ERROR_MESSAGES[code] : '报告生成失败，请稍后重试。'
       throw new ResearchApiError(message, code)
     }
-    if (!(mode === 'model' ? isModelReport(body) : isMockReport(body))) throw new ResearchApiError('返回的报告格式不正确，请稍后重试。', 'INVALID_REPORT')
-    // 上面的运行时检查已确保报告与当前模式对应。
+    if (!(mode === 'model' ? modelReportSchema : mockReportSchema).safeParse(body).success) throw new ResearchApiError('返回的报告格式不正确，请稍后重试。', 'INVALID_REPORT')
+    // 上面的运行时检查已确保报告与当前模式对应；返回原始响应，保留 schema 未列出的字段。
     return body as ResearchReport
   } catch (error) {
     if (signal.aborted) throw new ResearchApiError('请求已取消。', 'CANCELLED')
@@ -201,133 +195,6 @@ export async function generateReport(draft: ResearchDraft, signal: AbortSignal, 
   }
 }
 
-function validSource(source: unknown): source is EvidenceSource {
-  return isObject(source) && typeof source.sourceId === 'string' && typeof source.title === 'string'
-    && typeof source.publishedAt === 'string' && typeof source.url === 'string' && source.url.startsWith('https://') && ['document', 'market'].includes(String(source.kind))
-}
-function validCoverage(value: unknown): value is ReadCoverage {
-  return isObject(value) && typeof value.sourceId === 'string' && Number.isInteger(value.pageCount)
-    && Array.isArray(value.processedPages) && value.processedPages.every(Number.isInteger) && typeof value.textComplete === 'boolean'
-    && typeof value.processedCharacters === 'number' && Number.isInteger(value.batches) && Array.isArray(value.emptyTextPages)
-}
-export function isAgentReport(value: unknown): value is AgentResearchReport {
-  if (!isObject(value) || value.mode !== 'agent' || value.isMock !== false || !['retrieved', 'partial'].includes(String(value.evidenceStatus))) return false
-  if (!['target', 'question', 'userStyle', 'asOfDate', 'title', 'summary'].every((key) => typeof value[key] === 'string')
-    || !Array.isArray(value.omens) || !value.omens.every(isOmen) || !Array.isArray(value.sources) || !value.sources.every(validSource)
-    || !Array.isArray(value.coverage) || !value.coverage.every(validCoverage) || !Array.isArray(value.sections) || value.sections.length < 2
-    || !value.sections.every((s) => isObject(s) && typeof s.heading === 'string' && typeof s.content === 'string' && Array.isArray(s.citations)
-      && s.citations.every((c) => isObject(c) && typeof c.sourceId === 'string' && (c.page == null || Number.isInteger(c.page))))
-    || !Array.isArray(value.limitations) || !value.limitations.every((v) => typeof v === 'string') || !Array.isArray(value.toolCalls)
-    || !value.toolCalls.every((t) => isObject(t) && typeof t.name === 'string' && typeof t.status === 'string' && typeof t.toolCallId === 'string')
-    || !isObject(value.run) || !['completed', 'partial'].includes(String(value.run.status)) || typeof value.run.taskId !== 'string'
-    || typeof value.run.model !== 'string' || typeof value.run.stopReason !== 'string' || typeof value.run.modelCalls !== 'number') return false
-  if (value.marketData !== null) {
-    const data = value.marketData
-    if (!isObject(data) || !Array.isArray(data.series) || data.series.length < 2 || !isObject(data.metrics)
-      || !data.series.every((r) => isObject(r) && typeof r.date === 'string' && typeof r.close === 'number' && Number.isFinite(r.close)
-        && r.close > 0 && typeof r.adjustedClose === 'number' && Number.isFinite(r.adjustedClose) && r.adjustedClose > 0)
-      || !['tradingDays', 'firstRawClose', 'lastRawClose', 'adjustedChangePct', 'maxCloseDrawdownPct'].every((k) => typeof data.metrics === 'object' && typeof (data.metrics as Record<string, unknown>)[k] === 'number')
-      || !['provider', 'currency', 'actualStart', 'actualEnd', 'retrievedAt'].every((k) => typeof data[k] === 'string')
-      || !Array.isArray(data.sourceUrls) || !data.sourceUrls.every((u) => typeof u === 'string' && u.startsWith('https://'))) return false
-  }
-  if (value.financialData != null && !validFinancialData(value.financialData, value.sources as EvidenceSource[])) return false
-  if (value.businessData != null && !validBusinessData(value.businessData, value.sources as EvidenceSource[])) return false
-  if (value.figurePlan != null && !validFigurePlan(value)) return false
-  if (value.methodUsage != null) {
-    const m = value.methodUsage
-    if (!isObject(m) || typeof m.status!=='string' || typeof m.reviewed!=='boolean' || !Array.isArray(m.references)
-      || !m.references.every((r) => isObject(r) && typeof r.reference==='string' && typeof r.characters==='number' && typeof r.sha256==='string')
-      || !isObject(m.plan) || typeof m.plan.focus!=='string' || !Array.isArray(m.plan.checks)
-      || !m.plan.checks.every((c) => isObject(c) && ['topic','question','evidenceNeeded','figureIdea','methodReference'].every((k) => typeof c[k]==='string'))
-      || !Array.isArray(m.plan.unavailable) || !m.plan.unavailable.every((s) => typeof s==='string')) return false
-  }
-  if (value.researchSkill != null && (!isObject(value.researchSkill) || !['name','version','upstream'].every((k) => typeof (value.researchSkill as Record<string,unknown>)[k] === 'string'))) return false
-  if (value.visualReadings != null && (!Array.isArray(value.visualReadings) || !value.visualReadings.every((r) => isObject(r)
-    && typeof r.sourceId === 'string' && Array.isArray(r.pages) && r.pages.every((p) => Number.isInteger(p) && Number(p) > 0)
-    && Array.isArray(r.observations) && r.observations.every((o) => isObject(o) && Number.isInteger(o.page) && typeof o.summary === 'string'
-      && Array.isArray(o.uncertainties) && o.uncertainties.every((u) => typeof u === 'string'))))) return false
-  return true
-}
-
-function validFinancialData(data: unknown, sources: EvidenceSource[]): data is FinancialData {
-  const derived = new Set(['attributableMargin','grossMargin','liabilityRatio','rdExpenseRatio','rdInvestmentRatio'])
-  const keys = new Set(['revenue','netProfit','recurringProfit','operatingCashFlow','totalAssets','netAssets','rdExpense',
-    'operatingCost','totalLiabilities','cash','receivables','inventory','rdInvestment',...derived])
-  if (!isObject(data) || data.schemaVersion !== 1 || !Array.isArray(data.datasets) || data.datasets.length > 4
-    || !isObject(data.labels) || !Object.values(data.labels).every((s) => typeof s === 'string')
-    || typeof data.method !== 'string' || !Array.isArray(data.gaps) || !data.gaps.every((g) => typeof g === 'string')) return false
-  const ids = new Set<string>()
-  for (const dataset of data.datasets) {
-    if (!isObject(dataset) || typeof dataset.id !== 'string' || !['annual','h1','q1','q3'].includes(dataset.id) || ids.has(dataset.id)
-      || typeof dataset.label !== 'string' || !Array.isArray(dataset.rows) || dataset.rows.length > 3) return false
-    ids.add(dataset.id)
-    let previous = 0
-    for (const row of dataset.rows) {
-      if (!isObject(row) || typeof row.periodLabel !== 'string' || typeof row.year !== 'number' || !Number.isInteger(row.year) || row.year <= previous
-        || !isObject(row.values) || !isObject(row.yoy) || !isObject(row.evidence)) return false
-      previous = row.year
-      if (!Object.entries(row.values).every(([k,v]) => keys.has(k) && typeof v === 'number' && Number.isFinite(v))) return false
-      if (!Object.entries(row.yoy).every(([k,v]) => keys.has(k) && isObject(v) && typeof v.reason === 'string'
-        && (v.value === null || typeof v.value === 'number' && Number.isFinite(v.value)))) return false
-      if (!Object.entries(row.evidence).every(([k,e]) => keys.has(k) && isObject(e) && Number.isInteger(e.page) && Number(e.page) > 0
-        && typeof e.rawValue === 'string' && ['元','万元','亿元'].includes(String(e.unit)) && typeof e.verification === 'string'
-        && sources.some((s) => s.kind === 'document' && s.sourceId === e.sourceId && Number(e.page) <= Number(s.pageCount)))) return false
-      if (!Object.keys(row.values).every((k) => derived.has(k) || Object.hasOwn(row.evidence as object,k))) return false
-    }
-  }
-  return Array.isArray(data.charts) && data.charts.length <= 36 && data.charts.every((c) => isObject(c) && typeof c.id === 'string'
-    && typeof c.title === 'string' && ids.has(String(c.datasetId)) && ['bar','line'].includes(String(c.type))
-    && ['amount','yoy','ratio'].includes(String(c.valueKind)) && ['亿元','%'].includes(String(c.unit))
-    && Array.isArray(c.keys) && c.keys.length > 0 && c.keys.length <= 3 && c.keys.every((k) => typeof k === 'string' && keys.has(k)))
-}
-
-function validBusinessData(data: unknown, sources: EvidenceSource[]): data is BusinessData {
-  const validEvidence = (e: unknown) => isObject(e) && typeof e.sourceId==='string' && Number.isInteger(e.page) && Number(e.page)>0
-    && sources.some((s) => s.kind==='document' && s.sourceId===e.sourceId && Number(e.page)<=Number(s.pageCount))
-  const number = (v: unknown): v is number => typeof v==='number' && Number.isFinite(v) && v>=0
-  if (!isObject(data) || data.schemaVersion!==1 || typeof data.method!=='string' || !Array.isArray(data.gaps) || !data.gaps.every((g) => typeof g==='string')
-    || !Array.isArray(data.datasets) || data.datasets.length>12) return false
-  const ids = new Set<string>()
-  return data.datasets.every((d) => {
-    if (!isObject(d) || typeof d.id!=='string' || ids.has(d.id) || typeof d.label!=='string'
-      || !['product','geography','industry'].includes(String(d.dimension)) || !['annual','h1','q1','q3'].includes(String(d.period))
-      || !Array.isArray(d.rows) || d.rows.length<1 || d.rows.length>3) return false
-    ids.add(d.id)
-    let year = 0
-    return d.rows.every((r) => {
-      if (!isObject(r) || typeof r.year!=='number' || !Number.isInteger(r.year) || r.year<=year || typeof r.periodLabel!=='string'
-        || !number(r.total) || r.total===0 || !validEvidence(r.totalEvidence) || !Array.isArray(r.items) || r.items.length<2 || r.items.length>30) return false
-      year=r.year
-      const labels = new Set<string>()
-      let sum = 0
-      return r.items.every((p) => {
-        if (!isObject(p) || typeof p.label!=='string' || labels.has(p.label) || !number(p.value) || !number(p.share) || p.share>100.01
-          || typeof p.derived!=='boolean' || Math.abs(p.share-p.value/Number(r.total)*100)>.01 || !p.derived && !validEvidence(p)) return false
-        labels.add(p.label); sum+=p.value
-        return true
-      }) && Math.abs(sum-r.total)<=Math.max(.01,r.total*.0001)
-    })
-  })
-}
-
-function validFigurePlan(report: Record<string,unknown>): boolean {
-  if (!Array.isArray(report.figurePlan) || !Array.isArray(report.sections) || report.figurePlan.length!==report.sections.length) return false
-  const financial = report.financialData as FinancialData | undefined
-  const business = report.businessData as BusinessData | undefined
-  const sources = report.sources as EvidenceSource[]
-  const seen = new Set<string>()
-  return report.figurePlan.every((f,i) => {
-    if (!isObject(f) || f.sectionIndex!==i || !Array.isArray(f.financialChartIds) || !Array.isArray(f.businessDatasetIds)
-      || !f.financialChartIds.every((id) => financial?.charts.some((c) => c.id===id))
-      || !f.businessDatasetIds.every((id) => business?.datasets.some((d) => d.id===id))) return false
-    for (const id of [...f.financialChartIds,...f.businessDatasetIds]) { if (seen.has(String(id))) return false; seen.add(String(id)) }
-    const d=f.diagram
-    return d==null || isObject(d) && ['flow','cards'].includes(String(d.kind)) && typeof d.title==='string'
-      && Array.isArray(d.nodes) && d.nodes.length>=2 && d.nodes.length<=6 && d.nodes.every((n) => isObject(n) && typeof n.label==='string' && typeof n.detail==='string'
-        && Array.isArray(n.citations) && n.citations.length>0 && n.citations.every((c) => isObject(c) && sources.some((s) => s.sourceId===c.sourceId
-          && (s.kind==='market' || Number.isInteger(c.page) && Number(c.page)>0 && Number(c.page)<=Number(s.pageCount)))))
-  })
-}
 
 async function jobRequest(path: string, method: string, signal?: AbortSignal, body?: unknown): Promise<ResearchJob> {
   let response: Response
@@ -342,16 +209,11 @@ async function jobRequest(path: string, method: string, signal?: AbortSignal, bo
   try { result = await response.json() } catch { throw new ResearchApiError('任务响应无法识别。', 'INVALID_RESPONSE') }
   if (!response.ok) {
     if (response.status === 422 && isObject(result)) throw new ResearchApiError('研究输入未通过校验。', 'VALIDATION_ERROR', validationErrors(result))
-    const code = isObject(result) && isObject(result.error) && typeof result.error.code === 'string' ? result.error.code : 'RESEARCH_FAILED'
+    const code = errorCode(result, 'RESEARCH_FAILED')
     const extra: Record<string, string> = { RESEARCH_BUSY: '已有研究正在运行，请先恢复或停止该任务。', RESEARCH_NOT_FOUND: '任务不存在或服务已重启，请重新开始。' }
     throw new ResearchApiError(ERROR_MESSAGES[code] || extra[code] || '研究任务未能完成。', code)
   }
-  if (!isObject(result) || typeof result.taskId !== 'string' || !/^[0-9a-f-]{36}$/i.test(result.taskId)
-    || !['queued', 'running', 'completed', 'partial', 'failed', 'cancelled'].includes(String(result.status))
-    || typeof result.progress !== 'string' || typeof result.modelCalls !== 'number' || !Array.isArray(result.events)
-    || !result.events.every((e) => isObject(e) && typeof e.id === 'string' && typeof e.message === 'string' && typeof e.type === 'string')
-    || !Array.isArray(result.coverage) || !result.coverage.every(validCoverage)
-    || (result.report !== null && !isAgentReport(result.report))) throw new ResearchApiError('任务或报告格式不正确。', 'INVALID_REPORT')
+  if (!jobSchema.safeParse(result).success) throw new ResearchApiError('任务或报告格式不正确。', 'INVALID_REPORT')
   return result as ResearchJob
 }
 

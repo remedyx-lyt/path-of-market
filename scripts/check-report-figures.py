@@ -131,7 +131,11 @@ class RunnerChecks(unittest.IsolatedAsyncioTestCase):
         content={'title':'完成研究','summary':'证据支持的分析','sections':[{'heading':'业务','content':'事实','citations':[citation]},{'heading':'风险','content':'观察','citations':[citation]}]}
         async def complete(settings,messages,**kwargs):
             limits.append(kwargs['max_tokens'])
-            if kwargs.get('tools'):result={'ready':True}
+            if kwargs.get('tools') and kwargs.get('tool_choice')!='none':result={'ready':True}
+            elif 'references' in messages[1]['content'][:20]:
+                path=json.loads(messages[1]['content'])['references'][0]['reference']
+                check={'topic':'business','question':'q','evidenceNeeded':'e','figureIdea':'无','methodReference':path}
+                result={'focus':'f','checks':[check]*3,'unavailable':[]}
             elif '核对财经研究报告' in messages[0]['content']:result=json.loads(messages[1]['content'])['candidate']
             else:result=content
             return {'role':'assistant','content':json.dumps(result)},{'total_tokens':10}
@@ -140,7 +144,7 @@ class RunnerChecks(unittest.IsolatedAsyncioTestCase):
             job=ResearchJob(req);runner=AgentRunner(job,Tools(Path(temp)),ModelSettings('test'),completion=complete)
             runner.source(DOC);runner.coverage[DOC['documentId']].update(textComplete=True,processedPages=[1,2])
             await runner.run()
-            self.assertEqual(job.status,'completed',job.error);self.assertEqual(limits,[6500,14000,14000])
+            self.assertEqual(job.status,'completed',job.error);self.assertEqual(limits,[6500,6500,14000,14000])
 
     async def test_19_invalid_response_usage_is_still_counted(self):
         async def complete(*args,**kwargs):

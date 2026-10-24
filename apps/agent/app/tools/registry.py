@@ -11,8 +11,15 @@ from pydantic import ValidationError
 
 from app.core.config import PROJECT_ROOT
 from app.tools.cninfo import CninfoProvider
-from app.tools.contracts import (CompanyArguments, DocumentArguments, FindArguments,
-                                 ReadArguments, SearchArguments, BatchReadArguments, ToolError)
+from app.tools.contracts import (
+    CompanyArguments,
+    DocumentArguments,
+    FindArguments,
+    ReadArguments,
+    SearchArguments,
+    BatchReadArguments,
+    ToolError,
+)
 from app.tools.documents import DocumentStore
 from app.tools.market import MarketArguments, MarketProvider
 from app.schemas.financial import InspectArguments
@@ -27,18 +34,32 @@ class ToolDefinition:
     method: str
 
     def declaration(self):
-        return {"type": "function", "function": {"name": self.name, "description": self.description,
-                "parameters": self.arguments.model_json_schema(by_alias=True)}}
+        return {
+            "type": "function",
+            "function": {"name": self.name, "description": self.description, "parameters": self.arguments.model_json_schema(by_alias=True)},
+        }
 
 
 TOOLS = (
     ToolDefinition("resolve_company", "从巨潮当前公司目录识别沪深证券简称或六位代码；歧义返回候选。", CompanyArguments, "resolve"),
-    ToolDefinition("find_documents", "在线查找公司指定年度、截止日前披露的完整年报/中期/季报；排除摘要并保留修订版本。无需用户上传。", FindArguments, "find"),
+    ToolDefinition(
+        "find_documents",
+        "在线查找公司指定年度、截止日前披露的完整年报/中期/季报；排除摘要并保留修订版本。无需用户上传。",
+        FindArguments,
+        "find",
+    ),
     ToolDefinition("fetch_document", "下载 find_documents 发现的官方 PDF，缓存、校验并提取按页文本。", DocumentArguments, "fetch"),
     ToolDefinition("search_document", "在已下载 PDF 中搜索关键词并返回命中物理页和片段；可继续分页。", SearchArguments, "search"),
     ToolDefinition("read_document", "读取已下载 PDF 指定物理页原文与来源；过长时用 nextOffset 继续。", ReadArguments, "read"),
-    ToolDefinition("read_document_batch", "连续分批通读选定年报全部页面；从第一页开始，用 nextCursor 接续到 endOfDocument。关键词搜索仅辅助复查。", BatchReadArguments, "read_batch"),
-    ToolDefinition("get_market_data", "查询沪深股票日线、不复权价格与后复权序列，程序计算区间变化、回撤、波动及月度表现。", MarketArguments, "market"),
+    ToolDefinition(
+        "read_document_batch",
+        "连续分批通读选定年报全部页面；从第一页开始，用 nextCursor 接续到 endOfDocument。关键词搜索仅辅助复查。",
+        BatchReadArguments,
+        "read_batch",
+    ),
+    ToolDefinition(
+        "get_market_data", "查询沪深股票日线、不复权价格与后复权序列，程序计算区间变化、回撤、波动及月度表现。", MarketArguments, "market"
+    ),
     ToolDefinition("render_document_pages", "将已获取的PDF物理页渲染为PNG；渲染不等于模型已经理解。", InspectArguments, "render"),
 )
 
@@ -64,18 +85,25 @@ class ResearchTools:
             data = getattr(self, tool.method)(args)
             result.update(status="completed", data=data, error=None)
         except ValidationError as error:
-            result.update(status="failed", data=None, error={"code": "INVALID_TOOL_ARGUMENTS",
-                "message": "工具参数无效，请按工具定义提供公司、年度、日期或页码。",
-                "details": {"fields": [".".join(map(str, e["loc"])) for e in error.errors(include_input=False)]}})
+            result.update(
+                status="failed",
+                data=None,
+                error={
+                    "code": "INVALID_TOOL_ARGUMENTS",
+                    "message": "工具参数无效，请按工具定义提供公司、年度、日期或页码。",
+                    "details": {"fields": [".".join(map(str, e["loc"])) for e in error.errors(include_input=False)]},
+                },
+            )
         except ToolError as error:
-            result.update(status="failed", data=None,
-                          error={"code": error.code, "message": error.message, "details": error.details})
+            result.update(status="failed", data=None, error={"code": error.code, "message": error.message, "details": error.details})
         except Exception:
             # 不向模型或 HTTP 调用方暴露本地路径、堆栈或第三方响应。
-            result.update(status="failed", data=None, error={"code": "TOOL_EXECUTION_ERROR",
-                          "message": "工具执行失败，未生成可用证据。", "details": {}})
-        result.update(finishedAt=datetime.now(timezone.utc).isoformat(),
-                      durationMs=round((time.monotonic() - clock) * 1000))
+            result.update(
+                status="failed",
+                data=None,
+                error={"code": "TOOL_EXECUTION_ERROR", "message": "工具执行失败，未生成可用证据。", "details": {}},
+            )
+        result.update(finishedAt=datetime.now(timezone.utc).isoformat(), durationMs=round((time.monotonic() - clock) * 1000))
         return result
 
     def resolve(self, args):
@@ -89,8 +117,14 @@ class ResearchTools:
         gaps = [f"{year} 年所请求的完整定期报告在当前来源与截止日期下未找到。" for year in result["missingYears"]]
         if not result["queryComplete"]:
             gaps.append("已到公告查询页数上限，结果可能不完整。")
-        return {"company": company, "asOfDate": args.as_of_date, **result, "gaps": gaps,
-                "source": "巨潮公开披露网站", "searchedAt": datetime.now(timezone.utc).isoformat()}
+        return {
+            "company": company,
+            "asOfDate": args.as_of_date,
+            **result,
+            "gaps": gaps,
+            "source": "巨潮公开披露网站",
+            "searchedAt": datetime.now(timezone.utc).isoformat(),
+        }
 
     def fetch(self, args):
         return self.store.fetch(args.document_id, self.provider)

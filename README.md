@@ -6,11 +6,11 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 ## 当前状态
 
-截至 2026-10-24，M0 完整应用骨架、M1-1 至 M1-3 已完成。网页经 Java、Python 运行真实研究 Agent：模型选择工具，自动找报告、分批阅读原文、查询股票日线，再返回带引用和阅读覆盖的研究报告、行情图和计算表。
+截至 2026-10-24，M0 完整应用骨架、M1-1 至 M1-3 已完成；M1-4（预兆策略）代码与离线验收已完成，待真实模型验收，见 [M1-4 说明](docs/m1-4-omens.md)。网页经 Java、Python 运行真实研究 Agent：模型选择工具，自动找报告、分批阅读原文、查询股票日线，再返回带引用和阅读覆盖的研究报告、行情图和计算表。
 
 已初始化本地 Git，分支为 `main`。当前没有配置远程地址，代码和提交先保存在本地。
 
-按用户要求先补齐了财务研究 Skill、财务表图与局部 PDF 原页视觉；之后继续 M1-4。当前六个模型工具/八个底层工具，16个 Anthropic 原版 Skill/36个文件按许可保留。相关原版方法完整交给模型形成可调整的研究计划，模型主动选择业务/财务/研发/风险图并嵌入相关章节；不机械按图数配额。见 [方法实际使用与按论点选图](docs/methods-and-section-figures.md) 和 [研究Skill与表图说明](docs/financial-research-skill.md)。
+按用户要求先补齐了财务研究 Skill、财务表图与局部 PDF 原页视觉，随后完成代码整理、token 优化与 M1-4。当前六个逻辑工具/八个底层工具；不选预兆也按研究问题选择原版 Skill，选了预兆再叠加专属方法与检查；16个 Anthropic 原版 Skill/36个文件按许可保留。相关原版方法完整交给模型形成可调整的研究计划，模型主动选择业务/财务/研发/风险图并嵌入相关章节；不机械按图数配额。见 [方法实际使用与按论点选图](docs/methods-and-section-figures.md) 和 [研究Skill与表图说明](docs/financial-research-skill.md)。
 
 [查看最新中际旭创图文案例](http://127.0.0.1:5173/?task=921f4324-577a-4794-abf3-2823d0bab7c8) 不会重新调用模型。三份报告649页文字与局部图片分别记录，保留行情、业务/研发/财务与定性图，相关原版方法已完整用于计划和复核。任务只在 Python 进程内，重启/淘汰后链接失效；备份为 `storage/runs/section-figures-live.json` 和聊天工作区 `outputs/`。会话持久化与侧栏聊天仍在 M2。
 
@@ -70,6 +70,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-app.ps1
 
 Python 自动管理虚拟环境与依赖，网页按锁文件安装依赖，Java 使用 Maven Wrapper 构建。本机已验证 Python 3.14.3、JDK 25.0.2、Node.js 24.13.1 / npm 11.8.0。演示模式无需模型密钥；真实研究和模型思路需本地 `.env` 配置，当前均无需数据库。
 
+离线测试（不调用模型，标准库 unittest）：
+
+```powershell
+.\apps\agent\.venv\Scripts\python.exe -m unittest discover -s apps\agent\tests -t apps\agent\tests
+```
+
 原有专项检查仍可使用：
 
 ```powershell
@@ -112,9 +118,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 - `docs/research-runtime-plan.md`：研究上下文、工具循环、记忆、长报告、表格图表与阶段安排。
 - `AGENTS.md`、`docs/agent-design-decisions.md`：核心机制参考成熟实践、JSONL 会话方向、统一资料通读和学习交接。
 - `docs/m1-2-tools.md`：自动查年报、六个工具、连续全本阅读与验收。
-- `docs/m1-3-agent.md`：动态研究循环、三个逻辑工具/七个底层工具、股票行情、真实案例与学习入口。
-- `docs/financial-research-skill.md`：最新五个逻辑工具/八个底层工具、原版金融Skill、原页视觉、财务底稿/同比和图表。
-- `docs/current-state.md`：当前进度。
+- `docs/m1-3-agent.md`：M1-3 当时的动态研究循环（三个逻辑工具/七个底层工具）、股票行情、真实案例与学习入口。
+- `docs/m1-4-omens.md`：代码整理、token 优化、Skill 选择与 M1-4 预兆策略（当前六个逻辑工具/八个底层工具）、验收命令。
+- `docs/financial-research-skill.md`：原版金融Skill、原页视觉、财务底稿/同比和图表（写作时五个逻辑工具，当前六个）。
+- `docs/current-state.md`：当前进度（简要）；`docs/history.md`：此前的完整交付与验收记录。
 - `docs/task-board.md`：任务板。
 - `docs/dev-workflow.md`：AI 协作开发工作流。
 - `docs/handoff-prompt.md`：新聊天框交接提示词。
@@ -140,7 +147,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 
 2026-10-12 用户已确认恢复原来的最小闭环：先得到能打开、能输入、能展示演示报告的应用骨架，再接真实模型、资料工具和特色功能。应用架构和产品模块沿用原设计。
 
-2026-10-24 完成 M1-3 交接，并按用户要求提前接入股票日线、行情图和指标表。示例研究截止日为 2026-10-23。通用财务表图、长文分章、会话 JSONL 落盘、上下文摘要与检查点仍待 M2；下一项是 M1-4。统一资料通读与成熟实践依据见 `docs/agent-design-decisions.md`。
+2026-10-24 完成 M1-3 交接，并按用户要求提前接入股票日线、行情图和指标表。示例研究截止日为 2026-10-23。同日完成代码整理、token 优化与 M1-4（真实模型验收通过）。通用财务表图、长文分章、会话 JSONL 落盘、上下文摘要与检查点仍待 M2。统一资料通读与成熟实践依据见 `docs/agent-design-decisions.md`。
 
 每个里程碑继续拆成小任务；完成一个任务后核查结果、更新进度文档并提交 Git。具体状态以 `docs/current-state.md` 和 `docs/task-board.md` 为准。
 

@@ -101,6 +101,30 @@ M1-3 Runner 已区分发现、下载/解析、原文返回与 `processedPages` /
 
 完整联调暴露财务底稿随多次补查重复进入上下文；`AgentRunner.context` 已改为旧结果的有限有来源投影加一份当前底稿。完整记录仍保留，可回查；这是基本上下文投影，没有宣称完成 M2 自动 compaction/分支/会话恢复。细节、来源与学习入口见 `financial-research-skill.md`。
 
+## 2026-10-24：代码整理、token 用量与 M1-4 预兆策略
+
+依据 [DeepSeek KV 缓存说明](https://api-docs.deepseek.com/guides/kv_cache)、[定价](https://api-docs.deepseek.com/quick_start/pricing) 与 [Chat Completion 参数](https://api-docs.deepseek.com/api/create-chat-completion)：缓存默认开启，只有与先前请求**开头完全相同**的部分计为命中；`deepseek-flash` 命中价格约为未命中的 1/50；`usage` 返回 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`；`tool_choice` 支持 `none`。据此采用：
+
+| 机制 | 做法 | 理由与边界 |
+| --- | --- | --- |
+| 用量记账 | `model_client.usage_counts` 保留命中/未命中字段，任务与网页显示命中率 | 以前只记总数，无法判断真实费用 |
+| 稳定前缀 | 主循环开头固定为 系统规则+Skill → 原版财报方法 → Skill 目录 → 预兆规格 → 任务；历史投影只取决于消息本身；当前底稿和剩余轮数放在末尾 | 每轮只有新增内容计未命中 |
+| 写作沿用研究前缀 | 写作阶段不再替换系统提示，写作规则作为最后一条消息追加，并发送同一组工具定义、`tool_choice=none`、JSON 模式；供应商拒绝时自动退回不带工具的旧方式 | 工具定义也属于提示开头；不带工具的写作请求会整段未命中。组合未见官方限制但也未明示支持，故保留回退 |
+| 阅读笔记与问题无关 | `READ_SYSTEM` 改为通读要点，缓存键不含问题；旧键（含问题）仍可查到并转存新键 | 同一份年报换问题不再整本重读；仍是模型对原文的完整阅读，记录原运行 ID，不是会话记忆 |
+| 不重复回传 | 已通读资料再次 full 只返回覆盖与提示，不再整批回传笔记 | 笔记此前已在上下文中 |
+| 更少轮次 | `read_document` page 模式支持 `pages` 一次1至5页；提示允许同一轮并行调用互不依赖的工具 | 逐页一轮会让整段上下文反复计入 |
+| 精简底稿 | 每轮底稿去掉逐项证据（页码/原值仍在程序与最终报告中），图表菜单只给 id/标题/主题 | 实际案例每轮约 21k→12k 字符 |
+| 复核免重写 | 复核无需修改时只回 `{"unchanged":true}` | 省去整篇报告的重复输出（输出单价最高） |
+| 方法计划 | 方法参考固定顺序、放在任务之前；同一任务的计划结果缓存复用 | 跨研究也能命中前缀 |
+| 写作单独等待上限（真实验收后补） | `ModelSettings.report_timeout_seconds`（`LLM_REPORT_TIMEOUT_SECONDS`，默认 180，60–600）只用于写作与复核；研究轮次仍是 60 秒 | 真实案例中单次写作输出 1.27 万 token、耗时 69 秒，原来统一 60 秒上限会让整个任务失败；整体仍受 20 分钟任务预算约束 |
+| 机械格式由程序整理（真实验收后补） | `normalize_report()`：引用完全相同的去重并截到 schema 上限（章节 12、图节点 3）、去掉定性图层级多余字段、预兆自评列表截到 12；同一图表被多个章节引用时保留第一次出现。均记录事件（`report_normalized`、`figure_duplicates_removed`） | 真实案例中这类机械超限每次都触发整篇重写（每次约 1 万输出 token、50 秒），连续 3 次即中止；整理不改动正文。章节数超过 12 会删掉正文，仍退回模型，并在写作要求中写明合计上限 |
+| 接近上下文上限时收尾写作（真实验收后补） | 每轮决策前计算上下文长度，超过 `max_context_characters - context_reserve_characters`（160000 − 32000 字符）时发出 `context_wrapup`，不再让模型选工具，直接用已有证据写作；报告局限注明提前结束取证 | 参照 [Pi Compaction](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/compaction.md) 的触发方式 `contextTokens > contextWindow - reserveTokens`（默认预留 16384 token，2026-10-24 核对）。Pi 触发后做历史摘要；本项目的摘要压缩按 M2-5 实施，现阶段先保证有完整报告而非越限后只留部分结果 |
+| 工具消息投影（本机会话补） | `self.messages` 保留完整工具结果；`ToolView` 为每条工具消息一次性生成主循环投影和“较早回查摘录”两个版本，按 `tool_call_id` 缓存；回查原文按结构识别（单页 `text` 或 `pages` 列表） | 与 [Pi Agent Loop](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent-loop.ts) 的 `transformContext` / `convertToLlm` 思路一致（完整的 AgentMessage 记录与每次请求时发给模型的消息分开，2026-10-24 核对）；Pi 每次请求重新转换，这里把投影按消息缓存以免每轮重新解析，只在进程内，不写会话文件；投影仍只取决于消息本身，改动前后发给模型的消息逐字节一致。顺带修正：通读笔记的 `facts.text` 曾被字符串匹配误判为回查原文 |
+
+预兆（M1-4）沿用 `report-omens.md`：它是研究策略配置，不是独立模型。规格结构化在 `app/core/omens.py`，进入方法计划（专属检查与 Skill）、主循环上下文（资料偏好、工具提示、能力缺口）、写作要求（章节 `omens` 标记与 `omenCoverage`）和程序自检。程序只能核对结构与关键要素，内容是否充分由模型自评并经复核，`covered` 明确限定为“现有工具与已读资料范围内”。新闻/政策/行业历史等需要 M2-7 公开信息工具的资料一律列为 `capabilityGaps`。
+
+不选预兆时也按问题意图选 Skill（`select_methods`），并把 Skill 目录交给主循环模型按需读取；按需读取记录在 `methodUsage.onDemandReads`。方法计划失败不再中止研究，记录 `plan_failed` 并在报告局限中注明。
+
 ## 后续核心改动的固定流程（沿用）
 
 2026-10-24 后续补充：检查实际旧报告发现只有原版earnings-analysis默认注入，模型没有读取更详细原版；不能把保留16个文件等同于充分使用。新增按任务选择原版方法→完整阅读→模型形成研究主线/证据/图表建议→按实际取证调整→方法计划参与报告复核的内部流程，保留完整读取长度/哈希与计划。方法内容直接参考已许可的Anthropic公司研究、图表、财报workflow、质量检查和观点验证；没有引入另一套Agent框架，也不照搬固定图数/审批约定。

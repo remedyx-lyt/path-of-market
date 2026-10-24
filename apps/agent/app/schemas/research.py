@@ -31,18 +31,19 @@ class ResearchRequest(BaseModel):
         },
     )
 
-    target: str = Field(
-        min_length=1, max_length=120, strict=True, description="公司或板块名称"
-    )
-    question: str = Field(
-        min_length=1, max_length=2000, strict=True, description="本次研究问题"
-    )
+    target: str = Field(min_length=1, max_length=120, strict=True, description="公司或板块名称")
+    question: str = Field(min_length=1, max_length=2000, strict=True, description="本次研究问题")
     user_style: str = Field(
-        default="", alias="userStyle", max_length=500, strict=True,
+        default="",
+        alias="userStyle",
+        max_length=500,
+        strict=True,
         description="可选研究偏好",
     )
     omens: list[ReportOmen] = Field(
-        default_factory=list, max_length=4, strict=True,
+        default_factory=list,
+        max_length=4,
+        strict=True,
         description="可选研究预兆，本阶段只接收与展示",
     )
 
@@ -71,9 +72,7 @@ class MockResearchReport(BaseModel):
     summary: str
     sections: list[ReportSection]
     sources: list[str] = Field(default_factory=list, max_length=0)
-    tool_calls: list[dict[str, str]] = Field(
-        default_factory=list, max_length=0, alias="toolCalls"
-    )
+    tool_calls: list[dict[str, str]] = Field(default_factory=list, max_length=0, alias="toolCalls")
 
 
 class ModelResearchRequest(ResearchRequest):

@@ -27,6 +27,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 class PublicTransport:
     """固定官方主机、不转发模型密钥；限制每次请求的大小与等待时间。"""
+
     hosts = {"www.cninfo.com.cn", "static.cninfo.com.cn"}
 
     def __init__(self, timeout: float = 20):
@@ -35,11 +36,15 @@ class PublicTransport:
 
     def get_bytes(self, url: str, *, form: dict | None = None, maximum: int = 8_000_000) -> bytes:
         parsed = urlsplit(url)
-        if (parsed.scheme != "https" or parsed.hostname not in self.hosts
-                or parsed.username or parsed.password or parsed.port not in {None, 443}):
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in self.hosts
+            or parsed.username
+            or parsed.password
+            or parsed.port not in {None, 443}
+        ):
             raise ToolError("SOURCE_URL_REJECTED", "资料地址不属于当前接入的官方来源。")
-        headers = {"User-Agent": "Mozilla/5.0 PathOfMarket/0.3", "Referer": SITE + "/",
-                   "Accept-Encoding": "identity"}
+        headers = {"User-Agent": "Mozilla/5.0 PathOfMarket/0.3", "Referer": SITE + "/", "Accept-Encoding": "identity"}
         body = None
         if form is not None:
             headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
@@ -94,21 +99,27 @@ class CninfoProvider:
             data = self.transport.get_json(SITE + "/new/data/szse_stock.json")
             if not isinstance(data, dict) or not isinstance(data.get("stockList"), list):
                 raise ToolError("SOURCE_INVALID_RESPONSE", "公司目录格式发生变化，需要更新适配器。")
-            rows = [r for r in data["stockList"] if isinstance(r, dict)
-                    and re.fullmatch(r"[0-9]{6}", str(r.get("code", "")))
-                    and isinstance(r.get("zwjc"), str) and isinstance(r.get("orgId"), str)]
+            rows = [
+                r
+                for r in data["stockList"]
+                if isinstance(r, dict)
+                and re.fullmatch(r"[0-9]{6}", str(r.get("code", "")))
+                and isinstance(r.get("zwjc"), str)
+                and isinstance(r.get("orgId"), str)
+            ]
             if not rows:
                 raise ToolError("SOURCE_INVALID_RESPONSE", "公开公司目录为空，请稍后重试。")
             self._companies, self._companies_at = rows, time.monotonic()
         name = normalize_name(query)
         code = re.fullmatch(r"(?:sz|sh|bj)?([0-9]{6})(?:\.(?:sz|sh|bj))?", name)
-        matches = [r for r in self._companies if r["code"] == (code[1] if code else name)
-                   or normalize_name(r["zwjc"]) == name]
+        matches = [r for r in self._companies if r["code"] == (code[1] if code else name) or normalize_name(r["zwjc"]) == name]
         if len(matches) != 1:
             candidates = matches or [r for r in self._companies if name in normalize_name(r["zwjc"])]
-            raise ToolError("COMPANY_AMBIGUOUS" if candidates else "COMPANY_NOT_FOUND",
-                            "请用证券简称或六位代码明确研究对象。",
-                            {"candidates": [{"code": r["code"], "name": r["zwjc"]} for r in candidates[:10]]})
+            raise ToolError(
+                "COMPANY_AMBIGUOUS" if candidates else "COMPANY_NOT_FOUND",
+                "请用证券简称或六位代码明确研究对象。",
+                {"candidates": [{"code": r["code"], "name": r["zwjc"]} for r in candidates[:10]]},
+            )
         row = matches[0]
         exchange = "SSE" if row["code"].startswith("6") else "SZSE" if row["code"].startswith(("0", "2", "3")) else "BSE"
         market_hint = re.search(r"^(sz|sh|bj)|\.(sz|sh|bj)$", name)
@@ -118,9 +129,15 @@ class CninfoProvider:
                 raise ToolError("COMPANY_MARKET_MISMATCH", "代码与指定交易所不匹配，请核对研究对象。")
         if exchange == "BSE" or row["code"].startswith("2"):
             raise ToolError("MARKET_NOT_SUPPORTED", "本批先支持沪深 A 股年报；北交所、港股、美股后续接入。")
-        return {"code": row["code"], "name": row["zwjc"], "exchange": exchange,
-                "orgId": row["orgId"], "provider": self.name,
-                "directoryUrl": SITE + "/new/data/szse_stock.json", "resolvedAt": utc_now()}
+        return {
+            "code": row["code"],
+            "name": row["zwjc"],
+            "exchange": exchange,
+            "orgId": row["orgId"],
+            "provider": self.name,
+            "directoryUrl": SITE + "/new/data/szse_stock.json",
+            "resolvedAt": utc_now(),
+        }
 
     def find_documents(self, company: dict, years: list[int], as_of: str, report_types=None) -> dict:
         # 同一会计年度的完整修订版可能较晚披露；一直查到研究截止日。
@@ -131,15 +148,32 @@ class CninfoProvider:
             return {"documents": [], "missingYears": sorted(years), "queryComplete": True}
         found, complete = {}, False
         for page in range(1, 7):
-            result = self.transport.get_json(SITE + "/new/hisAnnouncement/query", form={
-                "pageNum": page, "pageSize": 30, "column": "szse" if company["exchange"] == "SZSE" else "sse",
-                "tabName": "fulltext", "stock": company["code"] + "," + company["orgId"],
-                "searchkey": "", "secid": "", "plate": "", "category": ";".join("category_" + categories[t] + "_szsh" for t in report_types) + ";",
-                "trade": "", "seDate": f"{min(years)}-01-01~{as_of}", "sortName": "time",
-                "sortType": "desc", "isHLtitle": "false"})
-            if (not isinstance(result, dict) or "announcements" not in result
-                    or result["announcements"] is not None and not isinstance(result["announcements"], list)
-                    or not isinstance(result.get("hasMore"), bool)):
+            result = self.transport.get_json(
+                SITE + "/new/hisAnnouncement/query",
+                form={
+                    "pageNum": page,
+                    "pageSize": 30,
+                    "column": "szse" if company["exchange"] == "SZSE" else "sse",
+                    "tabName": "fulltext",
+                    "stock": company["code"] + "," + company["orgId"],
+                    "searchkey": "",
+                    "secid": "",
+                    "plate": "",
+                    "category": ";".join("category_" + categories[t] + "_szsh" for t in report_types) + ";",
+                    "trade": "",
+                    "seDate": f"{min(years)}-01-01~{as_of}",
+                    "sortName": "time",
+                    "sortType": "desc",
+                    "isHLtitle": "false",
+                },
+            )
+            if (
+                not isinstance(result, dict)
+                or "announcements" not in result
+                or result["announcements"] is not None
+                and not isinstance(result["announcements"], list)
+                or not isinstance(result.get("hasMore"), bool)
+            ):
                 raise ToolError("SOURCE_INVALID_RESPONSE", "公告查询格式发生变化，需要更新适配器。")
             for item in result["announcements"] or []:
                 document = self._document(item, company, years, cutoff, report_types)
@@ -156,16 +190,21 @@ class CninfoProvider:
             document["preferred"] = key not in selected
             selected.add(key)
             selected_years.add(document["fiscalYear"])
-        return {"documents": documents, "missingYears": sorted(set(years) - selected_years), "queryComplete": complete,
-                "missingReports": [{"year": y, "reportType": t} for y in sorted(years) for t in report_types if (y, t) not in selected]}
+        return {
+            "documents": documents,
+            "missingYears": sorted(set(years) - selected_years),
+            "queryComplete": complete,
+            "missingReports": [{"year": y, "reportType": t} for y in sorted(years) for t in report_types if (y, t) not in selected],
+        }
 
     def _document(self, item, company, years, cutoff, report_types=None):
         if not isinstance(item, dict) or item.get("secCode") != company["code"] or item.get("orgId") != company["orgId"]:
             return None
         title = html.unescape(re.sub(r"<[^>]+>", "", str(item.get("announcementTitle", "")))).strip()
-        match = re.search(r"(20[0-9]{2})\s*年?(年度|半年度|第一季度|第三季度)报告(?:全文)?(?:[（(][^）)]*(?:修订|更新|更正|修正)[^）)]*[）)])?$", title)
-        if (not match or int(match[1]) not in years
-                or any(word in title for word in ("摘要", "英文", "取消", "撤销", "关于", "公告"))):
+        match = re.search(
+            r"(20[0-9]{2})\s*年?(年度|半年度|第一季度|第三季度)报告(?:全文)?(?:[（(][^）)]*(?:修订|更新|更正|修正)[^）)]*[）)])?$", title
+        )
+        if not match or int(match[1]) not in years or any(word in title for word in ("摘要", "英文", "取消", "撤销", "关于", "公告")):
             return None
         report_type = {"年度": "annual", "半年度": "interim", "第一季度": "q1", "第三季度": "q3"}[match[2]]
         if report_type not in (report_types or ["annual"]):
@@ -177,15 +216,34 @@ class CninfoProvider:
         if published > cutoff:
             return None
         identifier, relative = str(item.get("announcementId", "")), item.get("adjunctUrl", "")
-        if (not re.fullmatch(r"[0-9]{6,20}", identifier) or not isinstance(relative, str)
-                or not re.fullmatch(r"finalpage/[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9]+\.[Pp][Dd][Ff]", relative)):
+        if (
+            not re.fullmatch(r"[0-9]{6,20}", identifier)
+            or not isinstance(relative, str)
+            or not re.fullmatch(r"finalpage/[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9]+\.[Pp][Dd][Ff]", relative)
+        ):
             raise ToolError("SOURCE_INVALID_RESPONSE", "公告缺少有效 PDF 地址。")
-        return {"documentId": "cninfo-" + identifier, "title": title, "companyCode": company["code"],
-                "companyName": company["name"], "fiscalYear": int(match[1]), "reportType": report_type, "publishedAt": published.isoformat(),
-                "provider": self.name, "sourceUrl": STATIC + "/" + relative,
-                "announcementUrl": SITE + "/new/disclosure/detail?" + urlencode({"stockCode": company["code"],
-                    "announcementId": identifier, "orgId": company["orgId"], "announcementTime": published.isoformat()}),
-                "discoveredAt": utc_now()}
+        return {
+            "documentId": "cninfo-" + identifier,
+            "title": title,
+            "companyCode": company["code"],
+            "companyName": company["name"],
+            "fiscalYear": int(match[1]),
+            "reportType": report_type,
+            "publishedAt": published.isoformat(),
+            "provider": self.name,
+            "sourceUrl": STATIC + "/" + relative,
+            "announcementUrl": SITE
+            + "/new/disclosure/detail?"
+            + urlencode(
+                {
+                    "stockCode": company["code"],
+                    "announcementId": identifier,
+                    "orgId": company["orgId"],
+                    "announcementTime": published.isoformat(),
+                }
+            ),
+            "discoveredAt": utc_now(),
+        }
 
     def download(self, url: str) -> bytes:
         return self.transport.get_bytes(url, maximum=40_000_000)

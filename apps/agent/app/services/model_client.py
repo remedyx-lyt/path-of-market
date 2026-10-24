@@ -10,6 +10,15 @@ from app.core.config import ModelServiceError, ModelSettings
 from app.schemas.research import ModelContent
 
 MAX_RESPONSE_BYTES = 1_048_576
+# DeepSeek 自动前缀缓存：命中/未命中分别计价（命中约为未命中的 1/50），见 api-docs.deepseek.com/guides/kv_cache。
+USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens")
+
+
+def usage_counts(usage) -> dict:
+    """只保留供应商返回的非负整数用量字段；其他内容不进入任务记录。"""
+    if not isinstance(usage, dict):
+        return {}
+    return {name: value for name in USAGE_FIELDS if type(value := usage.get(name)) is int and value >= 0}
 
 
 def _request_payload(settings: ModelSettings, payload: dict) -> dict:
@@ -30,10 +39,12 @@ def _request_payload(settings: ModelSettings, payload: dict) -> dict:
                 connection.sock.settimeout(seconds)
 
         remaining()
-        connection.request("POST", url.path.rstrip("/") + "/chat/completions",
-                           body=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                           headers={"Authorization": f"Bearer {settings.api_key}",
-                                    "Content-Type": "application/json", "Accept": "application/json"})
+        connection.request(
+            "POST",
+            url.path.rstrip("/") + "/chat/completions",
+            body=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Authorization": f"Bearer {settings.api_key}", "Content-Type": "application/json", "Accept": "application/json"},
+        )
         remaining()
         response = connection.getresponse()
         if response.status != 200:
@@ -74,13 +85,28 @@ def _request_payload(settings: ModelSettings, payload: dict) -> dict:
         connection.close()
 
 
-async def complete_turn(settings: ModelSettings, messages: list[dict], *, tools: list | None = None,
-                        max_tokens: int | None = None, json_mode: bool = True) -> tuple[dict, dict]:
-    """标准 assistant/tool 协议；工具执行留给 Runner，截断的工具参数不执行。"""
-    payload = {"model": settings.model, "messages": messages, "stream": False,
-               "thinking": {"type": "disabled"}, "max_tokens": max_tokens or settings.max_tokens}
+async def complete_turn(
+    settings: ModelSettings,
+    messages: list[dict],
+    *,
+    tools: list | None = None,
+    max_tokens: int | None = None,
+    json_mode: bool = True,
+    tool_choice: str = "auto",
+) -> tuple[dict, dict]:
+    """标准 assistant/tool 协议；工具执行留给 Runner，截断的工具参数不执行。
+
+    tool_choice="none" 用于写作阶段：仍发送同一组工具定义，使提示开头与研究轮次一致（前缀缓存可命中），但不允许调用工具。
+    """
+    payload = {
+        "model": settings.model,
+        "messages": messages,
+        "stream": False,
+        "thinking": {"type": "disabled"},
+        "max_tokens": max_tokens or settings.max_tokens,
+    }
     if tools:
-        payload.update(tools=tools, tool_choice="auto")
+        payload.update(tools=tools, tool_choice=tool_choice)
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
     body, choice = None, None
@@ -90,9 +116,15 @@ async def complete_turn(settings: ModelSettings, messages: list[dict], *, tools:
         choice = body["choices"][0]
         message = choice["message"]
         calls = message.get("tool_calls") or []
-        if (choice.get("finish_reason") not in {"stop", "tool_calls"} or not isinstance(calls, list)
-                or len(calls) > 6 or calls and (not tools or choice.get("finish_reason") != "tool_calls")
-                or not calls and choice.get("finish_reason") != "stop"):
+        if (
+            choice.get("finish_reason") not in {"stop", "tool_calls"}
+            or not isinstance(calls, list)
+            or len(calls) > 6
+            or calls
+            and (not tools or choice.get("finish_reason") != "tool_calls")
+            or not calls
+            and choice.get("finish_reason") != "stop"
+        ):
             raise ValueError
         clean = {"role": "assistant", "content": message.get("content")}
         if clean["content"] is not None and not isinstance(clean["content"], str):
@@ -101,28 +133,30 @@ async def complete_turn(settings: ModelSettings, messages: list[dict], *, tools:
             normalized, ids = [], set()
             for call in calls:
                 identifier, function = call["id"], call["function"]
-                if (not isinstance(identifier, str) or not 1 <= len(identifier) <= 200 or identifier in ids
-                        or call.get("type") != "function" or not isinstance(function["name"], str)
-                        or not isinstance(function["arguments"], str) or len(function["arguments"]) > 16000):
+                if (
+                    not isinstance(identifier, str)
+                    or not 1 <= len(identifier) <= 200
+                    or identifier in ids
+                    or call.get("type") != "function"
+                    or not isinstance(function["name"], str)
+                    or not isinstance(function["arguments"], str)
+                    or len(function["arguments"]) > 16000
+                ):
                     raise ValueError
                 ids.add(identifier)
-                normalized.append({"id": identifier, "type": "function", "function":
-                                   {"name": function["name"], "arguments": function["arguments"]}})
+                normalized.append(
+                    {"id": identifier, "type": "function", "function": {"name": function["name"], "arguments": function["arguments"]}}
+                )
             clean["tool_calls"] = normalized
         elif not clean["content"]:
             raise ValueError
-        usage = body.get("usage") or {}
-        counts = {name: value for name in ("prompt_tokens", "completion_tokens", "total_tokens")
-                  if type(value := usage.get(name)) is int and value >= 0}
-        return clean, counts
+        return clean, usage_counts(body.get("usage"))
     except TimeoutError:
         raise ModelServiceError("MODEL_TIMEOUT", "模型响应超时，请重试或缩短问题。", 504) from None
     except (ValueError, KeyError, IndexError, TypeError, AttributeError):
-        error=ModelServiceError("MODEL_INVALID_RESPONSE", "模型未返回完整且有效的工具消息或内容。", 502)
-        error.finish_reason=choice.get('finish_reason') if isinstance(choice,dict) else None
-        raw_usage=body.get('usage',{}) if isinstance(body,dict) else {}
-        if not isinstance(raw_usage,dict): raw_usage={}
-        error.usage={k:v for k in ['prompt_tokens','completion_tokens','total_tokens'] if type(v:=raw_usage.get(k)) is int and v>=0}
+        error = ModelServiceError("MODEL_INVALID_RESPONSE", "模型未返回完整且有效的工具消息或内容。", 502)
+        error.finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
+        error.usage = usage_counts(body.get("usage") if isinstance(body, dict) else None)
         raise error from None
 
 

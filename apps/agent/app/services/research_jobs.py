@@ -28,18 +28,39 @@ class ResearchJob:
     task: object = field(default=None, repr=False)
 
     def emit(self, event_type, message, **details):
-        self.events.append({"id": str(uuid4()), "parentId": self.events[-1]["id"] if self.events else None,
-            "type": event_type, "timestamp": now(), "sessionId": self.session_id, "runId": self.task_id,
-            "message": message, **details})
+        self.events.append(
+            {
+                "id": str(uuid4()),
+                "parentId": self.events[-1]["id"] if self.events else None,
+                "type": event_type,
+                "timestamp": now(),
+                "sessionId": self.session_id,
+                "runId": self.task_id,
+                "message": message,
+                **details,
+            }
+        )
 
     def snapshot(self):
-        return {"taskId": self.task_id, "sessionId": self.session_id, "status": self.status,
-                "target": self.request.target, "startedAt": self.started_at, "finishedAt": self.finished_at,
-                "progress": self.events[-1]["message"] if self.events else "等待开始",
-                "events": self.events[-160:], "eventCount": len(self.events), "modelCalls": self.model_calls,
-                "usage": self.usage, "toolCalls": self.tool_calls, "sources": self.sources,
-                "coverage": self.coverage, "report": self.report, "error": self.error,
-                "storage": "process_memory"}
+        return {
+            "taskId": self.task_id,
+            "sessionId": self.session_id,
+            "status": self.status,
+            "target": self.request.target,
+            "startedAt": self.started_at,
+            "finishedAt": self.finished_at,
+            "progress": self.events[-1]["message"] if self.events else "等待开始",
+            "events": self.events[-160:],
+            "eventCount": len(self.events),
+            "modelCalls": self.model_calls,
+            "usage": self.usage,
+            "toolCalls": self.tool_calls,
+            "sources": self.sources,
+            "coverage": self.coverage,
+            "report": self.report,
+            "error": self.error,
+            "storage": "process_memory",
+        }
 
 
 class JobStore:

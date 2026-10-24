@@ -13,8 +13,7 @@ class ToolError(Exception):
 
 
 class Arguments(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True,
-                              populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True, populate_by_name=True)
 
 
 class CompanyArguments(Arguments):
@@ -22,11 +21,17 @@ class CompanyArguments(Arguments):
 
 
 class FindArguments(CompanyArguments):
-    years: list[Annotated[int, Field(ge=2000, le=2100)]] = Field(min_length=1, max_length=4,
-        description="报告所属会计年度，不是披露年份；一次最多四年。")
+    years: list[Annotated[int, Field(ge=2000, le=2100)]] = Field(
+        min_length=1, max_length=4, description="报告所属会计年度，不是披露年份；一次最多四年。"
+    )
     as_of_date: str = Field(alias="asOfDate", description="研究截止日期 YYYY-MM-DD；只用该日及之前披露的文件。")
-    report_types: list[Literal["annual", "interim", "q1", "q3"]] = Field(default=["annual"], alias="reportTypes",
-        min_length=1, max_length=4, description="annual 年报、interim 半年报、q1 一季报、q3 三季报；默认完整年报。")
+    report_types: list[Literal["annual", "interim", "q1", "q3"]] = Field(
+        default=["annual"],
+        alias="reportTypes",
+        min_length=1,
+        max_length=4,
+        description="annual 年报、interim 半年报、q1 一季报、q3 三季报；默认完整年报。",
+    )
 
     @field_validator("years")
     @classmethod
@@ -45,8 +50,9 @@ class FindArguments(CompanyArguments):
 
 
 class DocumentArguments(Arguments):
-    document_id: str = Field(alias="documentId", pattern=r"^cninfo-[0-9]{6,20}$",
-                             description="find_documents 返回的文件标识，不能传文件路径或任意 URL。")
+    document_id: str = Field(
+        alias="documentId", pattern=r"^cninfo-[0-9]{6,20}$", description="find_documents 返回的文件标识，不能传文件路径或任意 URL。"
+    )
 
 
 class ReadArguments(DocumentArguments):

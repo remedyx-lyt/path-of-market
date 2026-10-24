@@ -58,6 +58,12 @@ class ScriptedModel:
         usage = {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
         if not kwargs.get("tools"):
             task = json.loads(messages[1]["content"])
+            if "references" in task:
+                # 研究前的方法计划（M1-4 起每次研究都会按问题/预兆选择方法）。
+                check = {"topic": "business", "question": "经营变化来自哪里", "evidenceNeeded": "年报原文",
+                         "figureIdea": "无", "methodReference": task["references"][0]["reference"]}
+                return {"role": "assistant", "content": json.dumps({"focus": "经营变化", "checks": [check] * 3, "unavailable": []},
+                                                                   ensure_ascii=False)}, usage
             if "candidate" in task:
                 return {"role": "assistant", "content": json.dumps(task["candidate"], ensure_ascii=False)}, usage
             self.readings += 1

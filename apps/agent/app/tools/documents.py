@@ -88,12 +88,20 @@ class DocumentStore:
                 atomic_write(pdf_path, body)
                 metadata.update(sha256=sha256(body).hexdigest(), downloadedAt=utc_now(), byteSize=len(body))
             index = self._index(identifier, metadata)
-            metadata.update(pageCount=len(index["pages"]), extraction="pypdf-text", indexedAt=index["indexedAt"],
-                            indexSha256=sha256(self.path(identifier, ".pages.json").read_bytes()).hexdigest())
+            metadata.update(
+                pageCount=len(index["pages"]),
+                extraction="pypdf-text",
+                indexedAt=index["indexedAt"],
+                indexSha256=sha256(self.path(identifier, ".pages.json").read_bytes()).hexdigest(),
+            )
             write_json(self.path(identifier, ".json"), metadata)
-            return {"document": metadata, "cacheHit": cached, "pageCount": len(index["pages"]),
-                    "emptyTextPages": [p["page"] for p in index["pages"] if not p["text"].strip()],
-                    "limitations": ["PDF 文本提取不等于表格结构识别；扫描页需后续 OCR。"]}
+            return {
+                "document": metadata,
+                "cacheHit": cached,
+                "pageCount": len(index["pages"]),
+                "emptyTextPages": [p["page"] for p in index["pages"] if not p["text"].strip()],
+                "limitations": ["PDF 文本提取不等于表格结构识别；扫描页需后续 OCR。"],
+            }
 
     def _index(self, identifier, metadata):
         index_path = self.path(identifier, ".pages.json")
@@ -102,20 +110,31 @@ class DocumentStore:
                 content = index_path.read_bytes()
                 expected = metadata.get("indexSha256")
                 index = json.loads(content.decode("utf-8"))
-                if (isinstance(index, dict) and index.get("schemaVersion") == 1
-                        and index.get("sha256") == metadata.get("sha256")
-                        and (expected is None or expected == sha256(content).hexdigest())
-                        and isinstance(index.get("pages"), list) and 1 <= len(index["pages"]) <= 1000
-                        and all(isinstance(p, dict) and p.get("page") == n and isinstance(p.get("text"), str)
-                                and isinstance(p.get("pageLabel"), str) for n, p in enumerate(index["pages"], 1))):
+                if (
+                    isinstance(index, dict)
+                    and index.get("schemaVersion") == 1
+                    and index.get("sha256") == metadata.get("sha256")
+                    and (expected is None or expected == sha256(content).hexdigest())
+                    and isinstance(index.get("pages"), list)
+                    and 1 <= len(index["pages"]) <= 1000
+                    and all(
+                        isinstance(p, dict)
+                        and p.get("page") == n
+                        and isinstance(p.get("text"), str)
+                        and isinstance(p.get("pageLabel"), str)
+                        for n, p in enumerate(index["pages"], 1)
+                    )
+                ):
                     return index
             except (ValueError, OSError, UnicodeError):
                 pass
         try:
-            process = subprocess.run([sys.executable, str(Path(__file__).with_name("pdf_worker.py")),
-                                      str(self.path(identifier, ".pdf"))],
-                                     capture_output=True, timeout=60,
-                                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            process = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("pdf_worker.py")), str(self.path(identifier, ".pdf"))],
+                capture_output=True,
+                timeout=60,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
             if process.returncode != 0:
                 raise ToolError("PDF_PARSE_ERROR", "PDF 解析进程失败。")
             index = json.loads(process.stdout.decode("utf-8"))
@@ -154,13 +173,23 @@ class DocumentStore:
             if offset > len(text):
                 raise ToolError("OFFSET_OUT_OF_RANGE", "字符偏移超出本页范围。", {"totalCharacters": len(text)})
             end = min(len(text), offset + limit)
-            return {"document": metadata, "page": page, "pageLabel": entry["pageLabel"],
-                    "text": text[offset:end], "offset": offset, "totalCharacters": len(text),
-                    "truncated": end < len(text), "nextOffset": end if end < len(text) else None,
-                    "textStatus": "extracted" if text.strip() else "empty_or_needs_ocr",
-                    "citation": {"documentId": identifier, "page": page,
-                                 "sourceUrl": metadata["sourceUrl"] + f"#page={page}",
-                                 "publishedAt": metadata["publishedAt"]}}
+            return {
+                "document": metadata,
+                "page": page,
+                "pageLabel": entry["pageLabel"],
+                "text": text[offset:end],
+                "offset": offset,
+                "totalCharacters": len(text),
+                "truncated": end < len(text),
+                "nextOffset": end if end < len(text) else None,
+                "textStatus": "extracted" if text.strip() else "empty_or_needs_ocr",
+                "citation": {
+                    "documentId": identifier,
+                    "page": page,
+                    "sourceUrl": metadata["sourceUrl"] + f"#page={page}",
+                    "publishedAt": metadata["publishedAt"],
+                },
+            }
 
     def search(self, identifier, query, start_page, limit):
         with self.lock(identifier):
@@ -170,19 +199,30 @@ class DocumentStore:
             # 转义用户字符，只容忍 PDF 排版引入的空白；不用模型猜页码。
             pattern = re.compile(r"\s*".join(re.escape(c) for c in query if not c.isspace()), re.IGNORECASE)
             matches, next_page = [], None
-            for entry in pages[start_page - 1:]:
+            for entry in pages[start_page - 1 :]:
                 hit = pattern.search(entry["text"])
                 if hit:
                     page = entry["page"]
-                    matches.append({"page": page, "pageLabel": entry["pageLabel"],
-                                    "excerpt": entry["text"][max(0, hit.start() - 120):hit.end() + 280],
-                                    "sourceUrl": metadata["sourceUrl"] + f"#page={page}"})
+                    matches.append(
+                        {
+                            "page": page,
+                            "pageLabel": entry["pageLabel"],
+                            "excerpt": entry["text"][max(0, hit.start() - 120) : hit.end() + 280],
+                            "sourceUrl": metadata["sourceUrl"] + f"#page={page}",
+                        }
+                    )
                     if len(matches) == limit:
                         next_page = page + 1 if page < len(pages) else None
                         break
-            return {"document": metadata, "query": query, "matches": matches,
-                    "nextStartPage": next_page, "pageCount": len(pages),
-                    "searchType": "keyword", "limitations": ["只搜索可提取文本；未匹配不代表报告没有讨论该主题。"]}
+            return {
+                "document": metadata,
+                "query": query,
+                "matches": matches,
+                "nextStartPage": next_page,
+                "pageCount": len(pages),
+                "searchType": "keyword",
+                "limitations": ["只搜索可提取文本；未匹配不代表报告没有讨论该主题。"],
+            }
 
     def read_batch(self, identifier, start_page, offset, max_pages, max_characters):
         """连续阅读，不用关键词筛掉页面；游标允许下一次精确接续。"""
@@ -199,15 +239,33 @@ class DocumentStore:
                 end = min(len(page["text"]), begin + remaining)
                 text = page["text"][begin:end]
                 complete = end == len(page["text"])
-                entries.append({"page": page["page"], "pageLabel": page["pageLabel"], "offset": begin,
-                                "endOffset": end, "pageComplete": complete, "text": text,
-                                "textStatus": "extracted" if page["text"].strip() else "empty_or_needs_ocr",
-                                "sourceUrl": metadata["sourceUrl"] + f"#page={page['page']}"})
+                entries.append(
+                    {
+                        "page": page["page"],
+                        "pageLabel": page["pageLabel"],
+                        "offset": begin,
+                        "endOffset": end,
+                        "pageComplete": complete,
+                        "text": text,
+                        "textStatus": "extracted" if page["text"].strip() else "empty_or_needs_ocr",
+                        "sourceUrl": metadata["sourceUrl"] + f"#page={page['page']}",
+                    }
+                )
                 remaining -= len(text)
-                next_cursor = ({"startPage": page["page"], "offset": end} if not complete else
-                               {"startPage": page["page"] + 1, "offset": 0} if page["page"] < len(pages) else None)
+                next_cursor = (
+                    {"startPage": page["page"], "offset": end}
+                    if not complete
+                    else {"startPage": page["page"] + 1, "offset": 0}
+                    if page["page"] < len(pages)
+                    else None
+                )
                 if not complete or remaining == 0:
                     break
-            return {"document": metadata, "pages": entries, "nextCursor": next_cursor,
-                    "pageCount": len(pages), "endOfDocument": next_cursor is None,
-                    "coverageNote": "这是本次实际返回的原文范围；模型是否阅读及累计覆盖率须由研究 Runner 记录。"}
+            return {
+                "document": metadata,
+                "pages": entries,
+                "nextCursor": next_cursor,
+                "pageCount": len(pages),
+                "endOfDocument": next_cursor is None,
+                "coverageNote": "这是本次实际返回的原文范围；模型是否阅读及累计覆盖率须由研究 Runner 记录。",
+            }

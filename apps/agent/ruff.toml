@@ -1,0 +1,8 @@
+# 代码风格：ruff format 统一格式，ruff check 查未使用的导入/变量等明显问题。
+# 本机可选安装：.\.venv\Scripts\python.exe -m pip install ruff，然后在 apps/agent 下运行 ruff format app 与 ruff check app。
+line-length = 140
+target-version = "py313"
+
+[lint]
+select = ["E", "F", "W", "B"]
+ignore = ["E501", "E731", "B008", "B904"]
