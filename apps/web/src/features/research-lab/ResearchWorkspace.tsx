@@ -9,7 +9,7 @@ import { initialWorkspaceState, workspaceReducer } from './workspaceState'
 
 export function ResearchWorkspace() {
   const [state, dispatch] = useReducer(workspaceReducer, undefined, initialWorkspaceState)
-  const { draft, preview, errors, message, report, mode, job, resumeId, asOfDate, requestError, isGenerating } = state
+  const { draft, questionEdited, preview, errors, message, report, mode, job, resumeId, asOfDate, requestError, isGenerating } = state
   const requestRef = useRef<AbortController | null>(null)
   const pendingFocusRef = useRef<DraftErrors | null>(null)
   const targetRef = useRef<HTMLInputElement>(null)
@@ -219,9 +219,10 @@ export function ResearchWorkspace() {
               aria-describedby={`question-help${errors.question ? ' question-error' : ''}`}
             />
             <div className="field-help" id="question-help">
-              <span>问题越具体，研究方向越清晰。</span>
+              <span>{questionEdited ? '已保留你的问题，修改选项不会覆盖。' : '随研究对象、截止日期与预兆自动填写，可直接修改。'}</span>
               <span className={characterCount(draft.question) > 2000 ? 'counter-over' : ''}>{characterCount(draft.question)} / 2000</span>
             </div>
+            {questionEdited && <button className="text-button" type="button" disabled={isGenerating} onClick={() => dispatch({ type: 'defaultQuestionRestored' })}>恢复默认问题</button>}
             {errors.question && <p className="field-error" id="question-error">{errors.question}</p>}
           </div>
           <details className="research-options" ref={optionsRef}>

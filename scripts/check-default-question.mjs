@@ -1,0 +1,45 @@
+/** 页面状态场景验收，不创建研究任务、不调用模型。 */
+import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
+import path from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const requireWeb = createRequire(path.join(root, 'apps/web/package.json'))
+const { createServer } = await import(pathToFileURL(requireWeb.resolve('vite')).href)
+const vite = await createServer({ root: path.join(root, 'apps/web'), server: { middlewareMode: true }, appType: 'custom' })
+globalThis.sessionStorage = { getItem: () => null }
+try {
+  const { initialWorkspaceState, workspaceReducer: reduce } = await vite.ssrLoadModule('/src/features/research-lab/workspaceState.ts')
+  let state = initialWorkspaceState()
+  assert.ok(state.draft.question.length > 0)
+  state = reduce(state, { type: 'fieldEdited', field: 'target', value: '天齐锂业' })
+  state = reduce(state, { type: 'dateEdited', value: '2026-10-23' })
+  state = reduce(state, { type: 'omenToggled', value: 'ancient' })
+  assert.match(state.draft.question, /天齐锂业/)
+  assert.match(state.draft.question, /2026-10-23/)
+  assert.match(state.draft.question, /发展历程/)
+  state = reduce(state, { type: 'fieldEdited', field: 'question', value: '只研究现金流' })
+  state = reduce(state, { type: 'fieldEdited', field: 'target', value: '中际旭创' })
+  state = reduce(state, { type: 'dateEdited', value: '2025-12-31' })
+  state = reduce(state, { type: 'omenToggled', value: 'abyssal_echoes' })
+  assert.equal(state.draft.question, '只研究现金流')
+  state = reduce(state, { type: 'fieldEdited', field: 'question', value: '' })
+  state = reduce(state, { type: 'omenToggled', value: 'opportunity' })
+  assert.equal(state.draft.question, '')
+  state = reduce(state, { type: 'defaultQuestionRestored' })
+  assert.match(state.draft.question, /中际旭创/)
+  assert.match(state.draft.question, /2025-12-31/)
+  assert.equal(state.questionEdited, false)
+  state = reduce(state, { type: 'agentReportLoaded', report: { target: '旧公司', question: '原报告问题', userStyle: '', omens: [], asOfDate: '2024-12-31' }, message: '' })
+  state = reduce(state, { type: 'dateEdited', value: '2026-10-23' })
+  assert.equal(state.draft.question, '原报告问题')
+  state = reduce(state, { type: 'exampleFilled' })
+  assert.equal(state.questionEdited, false)
+  assert.match(state.draft.question, /2026-10-23/)
+  state = reduce(state, { type: 'reset', message: '' })
+  assert.equal(state.draft.target, '')
+  assert.ok(state.draft.question.length > 0)
+  state = reduce(state, { type: 'dateEdited', value: '' })
+  assert.doesNotMatch(state.draft.question, /undefined|NaN/)
+  console.log('F9：默认填写、三项联动、手改/清空保护、恢复模板、旧报告保护、示例/重置/空日期场景通过；0次模型调用。')
+} finally { await vite.close() }

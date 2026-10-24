@@ -1,10 +1,12 @@
 import type { AgentResearchReport, ResearchApiError, ResearchJob, ResearchMode, ResearchReport } from '../../api/research'
 import { EMPTY_DRAFT, EXAMPLE_DRAFT } from './researchDraft'
+import { defaultQuestion } from './defaultQuestion'
 import type { DraftErrors, ReportOmen, ResearchDraft } from './researchDraft'
 
 /** 研究工作台的页面状态。每个用户操作或请求阶段对应一个 action，状态变化集中在 reducer 中。 */
 export type WorkspaceState = {
   draft: ResearchDraft
+  questionEdited: boolean
   preview: ResearchDraft | null
   errors: DraftErrors
   message: string
@@ -23,6 +25,7 @@ export type WorkspaceAction =
   | { type: 'dateEdited'; value: string }
   | { type: 'modeChanged'; mode: ResearchMode }
   | { type: 'exampleFilled' }
+  | { type: 'defaultQuestionRestored' }
   | { type: 'draftRejected'; errors: DraftErrors }
   | { type: 'previewed'; draft: ResearchDraft; message: string }
   | { type: 'submitStarted'; draft: ResearchDraft }
@@ -43,9 +46,11 @@ function today() {
 }
 
 export function initialWorkspaceState(): WorkspaceState {
+  const asOfDate = today()
   return {
-    draft: { ...EMPTY_DRAFT }, preview: null, errors: {}, message: '', report: null, mode: 'agent', job: null,
-    resumeId: sessionStorage.getItem('path-of-market-active-job'), asOfDate: today(), requestError: null, isGenerating: false,
+    draft: { ...EMPTY_DRAFT, question: defaultQuestion(EMPTY_DRAFT, asOfDate) }, questionEdited: false,
+    preview: null, errors: {}, message: '', report: null, mode: 'agent', job: null,
+    resumeId: sessionStorage.getItem('path-of-market-active-job'), asOfDate, requestError: null, isGenerating: false,
   }
 }
 
@@ -56,18 +61,28 @@ const draftOf = (report: ResearchReport): ResearchDraft => ({ target: report.tar
 
 export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState {
   switch (action.type) {
-    case 'fieldEdited':
-      return { ...state, ...invalidated, draft: { ...state.draft, [action.field]: action.value }, errors: { ...state.errors, [action.field]: undefined } }
+    case 'fieldEdited': {
+      const draft = { ...state.draft, [action.field]: action.value }
+      const questionEdited = state.questionEdited || action.field === 'question'
+      if (!questionEdited) draft.question = defaultQuestion(draft, state.asOfDate)
+      return { ...state, ...invalidated, draft, questionEdited, errors: { ...state.errors, [action.field]: undefined } }
+    }
     case 'omenToggled': {
       const omens = state.draft.omens.includes(action.value) ? state.draft.omens.filter((omen) => omen !== action.value) : [...state.draft.omens, action.value]
-      return { ...state, ...invalidated, draft: { ...state.draft, omens }, errors: { ...state.errors, omens: undefined } }
+      const draft = { ...state.draft, omens }
+      if (!state.questionEdited) draft.question = defaultQuestion(draft, state.asOfDate)
+      return { ...state, ...invalidated, draft, errors: { ...state.errors, omens: undefined } }
     }
     case 'dateEdited':
-      return { ...state, ...invalidated, asOfDate: action.value, errors: { ...state.errors, asOfDate: undefined } }
+      return { ...state, ...invalidated, asOfDate: action.value,
+        draft: state.questionEdited ? state.draft : { ...state.draft, question: defaultQuestion(state.draft, action.value) },
+        errors: { ...state.errors, asOfDate: undefined } }
     case 'modeChanged':
       return { ...state, ...invalidated, mode: action.mode, errors: {} }
     case 'exampleFilled':
-      return { ...state, ...invalidated, draft: { ...EXAMPLE_DRAFT, omens: [...EXAMPLE_DRAFT.omens] }, errors: {}, message: '已填入示例，可修改或直接生成报告。' }
+      return { ...state, ...invalidated, draft: { ...EXAMPLE_DRAFT, omens: [...EXAMPLE_DRAFT.omens], question: defaultQuestion(EXAMPLE_DRAFT, state.asOfDate) }, questionEdited: false, errors: {}, message: '已填入示例，可修改或直接生成报告。' }
+    case 'defaultQuestionRestored':
+      return { ...state, ...invalidated, draft: { ...state.draft, question: defaultQuestion(state.draft, state.asOfDate) }, questionEdited: false, errors: { ...state.errors, question: undefined } }
     case 'draftRejected':
       return { ...state, errors: action.errors, preview: null, message: '请检查标出的输入内容。' }
     case 'previewed':
@@ -88,7 +103,7 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case 'jobOpened':
       return { ...state, job: action.job, mode: 'agent', resumeId: action.job.taskId }
     case 'agentReportLoaded':
-      return { ...state, mode: 'agent', report: action.report, draft: draftOf(action.report), asOfDate: action.report.asOfDate, resumeId: null, message: action.message }
+      return { ...state, mode: 'agent', report: action.report, draft: draftOf(action.report), questionEdited: true, asOfDate: action.report.asOfDate, resumeId: null, message: action.message }
     case 'requestFailed':
       return {
         ...state, requestError: action.error, errors: action.errors ?? state.errors,
@@ -99,6 +114,6 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case 'cancelUnconfirmed':
       return { ...state, resumeId: action.taskId, message: action.message }
     case 'reset':
-      return { ...state, ...invalidated, isGenerating: false, draft: { ...EMPTY_DRAFT }, errors: {}, resumeId: null, message: action.message }
+      return { ...state, ...invalidated, isGenerating: false, draft: { ...EMPTY_DRAFT, question: defaultQuestion(EMPTY_DRAFT, state.asOfDate) }, questionEdited: false, errors: {}, resumeId: null, message: action.message }
   }
 }
