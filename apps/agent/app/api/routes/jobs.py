@@ -7,11 +7,52 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from app.core.config import ModelServiceError, load_model_settings
 from app.schemas.agent import AgentResearchRequest
+from app.schemas.discussion import FollowupRequest
+from app.services.report_discussion import DiscussionRunner, prepare_followup
+from app.services.research_jobs import ResearchJob
 from app.services.research_jobs import job_store
 from app.services.research_recovery import load_recovery, recovery_error
 from app.tools.registry import get_research_tools
 
 router = APIRouter(prefix="/research/jobs", tags=["研究 Agent"])
+
+
+@router.post("/{task_id}/chat", status_code=202)
+async def followup_job(task_id: UUID, request: FollowupRequest):
+    try:
+        tools = get_research_tools()
+        prepared = await asyncio.to_thread(prepare_followup, tools, str(task_id), request)
+        if "existingTaskId" in prepared:
+            existing = job_store.jobs.get(prepared["existingTaskId"])
+            if existing:
+                return existing.snapshot()
+            # 让网页按这个标识读取 Java 已落盘快照，不重新收费。
+            raise recovery_error("此请求已经保存；请刷新对话记录后查看，勿重复提交。")
+        settings = load_model_settings()
+        # 同一次事件循环中检查并注册，避免两个 HTTP 请求同时启动模型。
+        if any(j.status in {"queued", "running"} or j.task and not j.task.done() for j in job_store.jobs.values()):
+            return JSONResponse(status_code=409, content={"error": {"code": "RESEARCH_BUSY", "message": "已有研究或对话正在运行。"}})
+        if prepared["recovery"].get("model") and prepared["recovery"]["model"] != settings.model:
+            raise recovery_error("模型与原研究不同，请先恢复原模型配置。")
+        if prepared["recovery"].get("baseUrl") and prepared["recovery"]["baseUrl"] != settings.base_url:
+            raise recovery_error("接口与原研究不同，请先恢复原接口配置。")
+        job = ResearchJob(prepared["request"], session_id=prepared["sessionId"])
+        job.parent_task_id = str(task_id)
+        runner = DiscussionRunner(job, tools, settings, prepared, request)
+        while len(job_store.jobs) >= 8:
+            job_store.jobs.pop(next(iter(job_store.jobs)))
+        job_store.jobs[job.task_id] = job
+        # 先保存请求标识与父节点；落盘失败时不启动任何付费调用。
+        if not await job.recorder.flush():
+            await job.recorder.close(attempts=1)
+            job_store.jobs.pop(job.task_id, None)
+            raise recovery_error("会话存储暂不可用，未启动模型，请稍后重试。")
+        job.task = asyncio.create_task(runner.run())
+        return job.snapshot()
+    except ModelServiceError as error:
+        return JSONResponse(status_code=error.status, content={"error": {"code": error.code, "message": error.message}})
+    except (ValueError, KeyError, TypeError):
+        return JSONResponse(status_code=409, content={"error": {"code": "RESEARCH_NOT_RESUMABLE", "message": "保存的会话或所选分支不完整，未启动模型调用。"}})
 
 
 def missing():

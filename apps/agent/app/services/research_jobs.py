@@ -30,6 +30,7 @@ class ResearchJob:
     task: object = field(default=None, repr=False)
     recorder: object = field(default=None, repr=False)  # SessionRecorder；单元测试直接构造的任务没有
     parent_task_id: str | None = None
+    followup: dict | None = None
 
     def emit(self, event_type, message, **details):
         event = {
@@ -74,6 +75,7 @@ class ResearchJob:
             "storage": "session_jsonl" if self.recorder else "process_memory",
             "persistence": self.recorder.status() if self.recorder else None,
             "parentTaskId": self.parent_task_id,
+            "followup": self.followup,
         }
 
 
@@ -86,7 +88,7 @@ class JobStore:
             previous = next((j for j in self.jobs.values() if j.parent_task_id == recovery["taskId"]), None)
             if previous:
                 return previous
-        if any(j.status in {"queued", "running"} for j in self.jobs.values()):
+        if any(j.status in {"queued", "running"} or j.task and not j.task.done() for j in self.jobs.values()):
             return None
         while len(self.jobs) >= 8:
             self.jobs.pop(next(iter(self.jobs)))
@@ -107,7 +109,8 @@ class JobStore:
     def cancel(self, job):
         if job.status in {"queued", "running"}:
             job.cancel_requested = True
-            job.task.cancel()
+            if job.task:
+                job.task.cancel()
             if job.status == "queued":
                 job.status = "cancelled"
                 job.finished_at = now()

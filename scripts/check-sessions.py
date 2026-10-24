@@ -19,6 +19,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 FOLDER = ROOT / ".runtime/qa/sessions"
+JAR_PATH = ROOT / "apps/server/target/path-of-market-server.jar"
 
 
 def request(base, path, method="GET", body=None):
@@ -53,7 +54,7 @@ def start_java(port, provider_port):
         raise SystemExit("需要 JDK java。")
     log = (FOLDER / "java.log").open("ab")
     process = subprocess.Popen(
-        [java, "-Dfile.encoding=UTF-8", "-jar", str(ROOT / "apps/server/target/path-of-market-server.jar"), f"--server.port={port}",
+        [java, "-Dfile.encoding=UTF-8", "-jar", str(JAR_PATH), f"--server.port={port}",
          f"--agent.base-url=http://127.0.0.1:{provider_port}", f"--sessions.dir={FOLDER / 'store'}"],
         cwd=ROOT / "apps/server", stdout=log, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     base = f"http://127.0.0.1:{port}"

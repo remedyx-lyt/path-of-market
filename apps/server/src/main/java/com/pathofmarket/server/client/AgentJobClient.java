@@ -41,6 +41,7 @@ public class AgentJobClient {
     public ResponseEntity<JsonNode> get(UUID taskId) { return request("GET", "/" + taskId, null); }
     public ResponseEntity<JsonNode> cancel(UUID taskId) { return request("DELETE", "/" + taskId, null); }
     public ResponseEntity<JsonNode> continueRun(UUID taskId) { return request("POST", "/" + taskId + "/continue", null); }
+    public ResponseEntity<JsonNode> chat(UUID taskId, JsonNode body) { return request("POST", "/" + taskId + "/chat", body); }
 
     private ResponseEntity<JsonNode> request(String method, String suffix, JsonNode body) {
         URI uri = URI.create(properties.baseUrl().toString().replaceAll("/+$", "") + "/research/jobs" + suffix);
@@ -87,8 +88,9 @@ public class AgentJobClient {
             throw failure(HttpStatus.valueOf(status), code, message);
         }
         validateJob(result);
-        if (suffix.endsWith("/continue")) {
-            if (!suffix.equals("/" + result.path("parentTaskId").asString("") + "/continue")) throw invalid();
+        if (suffix.endsWith("/continue") || suffix.endsWith("/chat")) {
+            String action = suffix.endsWith("/chat") ? "/chat" : "/continue";
+            if (!suffix.equals("/" + result.path("parentTaskId").asString("") + action)) throw invalid();
         } else if (!suffix.isEmpty() && !suffix.equals("/" + result.path("taskId").asString(""))) throw invalid();
         return ResponseEntity.status(status).body(result);
     }

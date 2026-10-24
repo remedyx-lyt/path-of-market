@@ -59,12 +59,12 @@ def current_messages(entries):
     return [e["message"] for e in chain if e.get("type") == "message" and e["id"] not in removed]
 
 
-def legacy_recovery(entries, task_id):
+def legacy_recovery(entries, task_id, *, allow_completed=False):
     header = entries[0]
     if header.get("type") != "session" or header.get("runId") != task_id:
         raise recovery_error("会话与请求的任务不一致。")
     latest = next((e for e in reversed(entries) if e.get("type") == "run_state"), {})
-    if latest.get("status") == "completed":
+    if latest.get("status") == "completed" and not allow_completed:
         raise recovery_error("研究已经完成，无需从未完成位置接续。")
     report = next((e["report"] for e in reversed(entries) if e.get("type") == "report"), None)
     if not report:
@@ -128,7 +128,7 @@ def legacy_recovery(entries, task_id):
     }
 
 
-def load_recovery(tools, task_id):
+def load_recovery(tools, task_id, *, allow_completed=False):
     path = checkpoint_path(tools, task_id)
     if path.exists():
         try:
@@ -144,7 +144,7 @@ def load_recovery(tools, task_id):
             entries = json.load(response)["entries"]
     except (OSError, ValueError, KeyError):
         raise recovery_error("未找到可接续的会话或存储服务不可用。") from None
-    return legacy_recovery(entries, task_id)
+    return legacy_recovery(entries, task_id, allow_completed=allow_completed)
 
 
 def restore_runner(runner, recovery):

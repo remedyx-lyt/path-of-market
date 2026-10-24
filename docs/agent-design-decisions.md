@@ -149,3 +149,9 @@ JSONL 已实现主循环消息/事件/报告保存与重启查看；仍没有重
 # 2026-10-24 补充：调用预算与接续
 
 依据 [Pi session-format](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/session-format.md) 当前父链、[LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence) 的执行状态检查点，补充 Python 原子执行检查点与旧 JSONL 迁移恢复。Java 继续保存追加会话；新运行通过 continuation 条目关联旧运行，旧结果不改。取证预算与写作预留分开；本地回查不消耗模型调用额度。随后按用户要求接入 F17 大纲、逐节校验保存、摘要；成功章节不因后续失败作废，report_draft也逐条落盘。摘要只接收完整正文，避免与取证历史叠加超限；账户类错误不无限重试。代码、边界与验证见 [调用预算与接续](budget-and-continuation.md)。M2-5 上下文摘要压缩仍待做，分节写作未额外收费重生成报告验收。
+
+## 2026-10-24：M2-4报告对话和版本
+
+再次核对上述Pi会话格式的`parentId`/当前叶节点与agent-loop的`transformContext`、`convertToLlm`，以及[DeepSeek原生工具协议](https://api-docs.deepseek.com/guides/tool_calls/)。采用同会话追加请求、消息、工具结果与报告版本；从用户选中的节点回溯，其他分支不进入对话。运行记录与每次模型输入分开：输入为选定报告、实际通读笔记和该父链的问答，原始工具消息另存。当前尚无compaction，不能把投影说成长期记忆或摘要压缩。
+
+版本用程序合并经过引用校验的章节补丁，不让模型重写覆盖旧报告；修订继承原图表/数据表，明确未重新整体审计。请求先落盘、以requestId去重，有限重试与失败检查点沿用现有预算和恢复机制。本轮不新增逻辑工具，复用六个工具；21项隔离集成通过，未新增真实模型账户调用。学习入口、采用边界和验收详见[m2-4-report-discussion.md](m2-4-report-discussion.md)。

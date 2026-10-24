@@ -96,6 +96,7 @@ export type ResearchJob = {
   progress: string; modelCalls: number; usage: Record<string, number>; coverage: ReadCoverage[]
   phase?: string
   parentTaskId?: string | null
+  persistence?: { unsent: number; lastError?: string | null } | null
   events: JobEvent[]
   report: AgentResearchReport | null; error: { code: string; message: string } | null
 }

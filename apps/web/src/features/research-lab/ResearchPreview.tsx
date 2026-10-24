@@ -3,6 +3,7 @@ import type { ResearchDraft } from './researchDraft'
 import type { ResearchJob, ResearchReport as Report } from '../../api/research'
 import { ActivityPanel } from './ActivityPanel'
 import { ResearchReport } from './ResearchReport'
+import { ReportWorkbench } from './ReportWorkbench'
 
 type Props = { draft: ResearchDraft | null; report: Report | null; isGenerating: boolean; hasError: boolean; job?: ResearchJob | null; onContinue?: () => void }
 
@@ -19,8 +20,8 @@ export function ResearchPreview({ draft, report, isGenerating, hasError, job, on
         </span>
       </div>
       {partial && onContinue && !isGenerating && <div className="continuation-actions"><button className="primary-button" type="button" onClick={onContinue}>从已保存进度继续 →</button><p>保留已读资料与证据，继续补查和写作；会产生新的模型调用。</p></div>}
-      {report && job?.events.length ? <details className="activity-replay" open={isGenerating || undefined}><summary>研究过程回放 · {job.modelCalls} 次模型调用</summary><ActivityPanel job={job} live={isGenerating} /></details> : null}
-      {report ? <ResearchReport report={report} /> : job?.events.length ? <><h2>{job.target}</h2><ActivityPanel job={job} live={isGenerating} /></> : <>
+      {report && job?.events.length ? <details className="activity-replay" open={isGenerating || undefined}><summary><strong>查看研究过程与工具记录</strong><span>{job.modelCalls} 次模型调用 · 展开回放</span></summary><ActivityPanel job={job} live={isGenerating} /></details> : null}
+      {report ? report.mode === 'agent' ? <ReportWorkbench key={report.run.taskId} report={report} /> : <ResearchReport report={report} /> : job?.events.length ? <><h2>{job.target}</h2><ActivityPanel job={job} live={isGenerating} /></> : <>
       <h2>这次研究，<br />关注什么？</h2>
       <dl className="preview-fields">
         <div>

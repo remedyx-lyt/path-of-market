@@ -34,7 +34,7 @@ import tools.jackson.databind.node.ObjectNode;
 @Component
 public class SessionStore {
     private static final Pattern UUID_PATTERN = Pattern.compile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
-    private static final Set<String> TYPES = Set.of("session", "event", "message", "context_edit", "report", "run_state", "continuation", "report_draft");
+    private static final Set<String> TYPES = Set.of("session", "event", "message", "context_edit", "report", "run_state", "continuation", "report_draft", "followup", "chat_turn");
 
     private final Path directory;
     private final JsonMapper mapper;
@@ -129,6 +129,43 @@ public class SessionStore {
         return sessionForRun(runId).flatMap(this::load).map(entries -> buildSnapshot(runId, entries));
     }
 
+    /** 面向网页的报告/对话投影；不暴露原始工具消息和模型上下文。 */
+    public Optional<ObjectNode> discussion(String runId) {
+        return sessionForRun(runId).flatMap(this::load).map(entries -> {
+            ObjectNode result = mapper.createObjectNode();
+            result.put("sessionId", entries.getFirst().path("id").asString(""));
+            result.put("rootTaskId", entries.getFirst().path("runId").asString(""));
+            ArrayNode versions = mapper.createArrayNode(), turns = mapper.createArrayNode();
+            Map<String, JsonNode> completed = new java.util.HashMap<>();
+            for (JsonNode entry : entries) if ("chat_turn".equals(entry.path("type").asString(""))) completed.put(entry.path("runId").asString(""), entry);
+            for (JsonNode entry : entries) {
+                String type = entry.path("type").asString("");
+                if ("report".equals(type)) {
+                    ObjectNode version = mapper.createObjectNode();
+                    for (String key : List.of("id", "runId", "timestamp", "reportVersion", "parentVersionId", "changedSections", "summaryChanged", "report"))
+                        if (entry.has(key)) version.set(key, entry.path(key));
+                    versions.add(version);
+                } else if ("followup".equals(type)) {
+                    ObjectNode turn = mapper.createObjectNode();
+                    for (String key : List.of("runId", "timestamp", "requestId", "parentTurnId", "baseVersionId", "userMessage", "action")) turn.set(key, entry.path(key));
+                    JsonNode end = completed.get(entry.path("runId").asString(""));
+                    if (end != null) {
+                        for (String key : List.of("id", "answer", "citations", "sources", "status", "error", "versionId")) if (end.has(key)) turn.set(key, end.path(key));
+                    } else {
+                        turn.put("id", entry.path("id").asString(""));
+                        turn.put("status", "pending");
+                        turn.put("answer", "");
+                        turn.set("citations", mapper.createArrayNode());
+                    }
+                    turns.add(turn);
+                }
+            }
+            result.set("versions", versions);
+            result.set("turns", turns);
+            return result;
+        });
+    }
+
     /** 最近的研究记录（按会话创建时间倒序），每条含研究对象、问题、状态与报告标题。 */
     public List<ObjectNode> recent(int limit) {
         List<ObjectNode> sessions = new ArrayList<>();
@@ -142,7 +179,7 @@ public class SessionStore {
     private ObjectNode buildSnapshot(String runId, List<JsonNode> entries) {
         JsonNode header = entries.getFirst();
         ArrayNode events = mapper.createArrayNode();
-        JsonNode report = null, state = null;
+        JsonNode report = null, state = null, followup = null;
         String phase = "queued";
         int modelCalls = 0;
         for (JsonNode entry : entries) {
@@ -155,12 +192,14 @@ public class SessionStore {
                     if ("model_finished".equals(event.path("type").asString(""))) modelCalls++;
                 }
                 case "report" -> report = entry.path("report");
+                case "chat_turn" -> followup = entry;
                 case "run_state" -> state = entry;
                 default -> { }
             }
         }
         ObjectNode snapshot = mapper.createObjectNode();
         snapshot.put("taskId", runId);
+        snapshot.set("followup", followup);
         snapshot.put("sessionId", header.path("id").asString(""));
         snapshot.put("target", header.path("request").path("target").asString(""));
         snapshot.put("startedAt", header.path("timestamp").asString(""));
@@ -201,7 +240,7 @@ public class SessionStore {
         summary.put("status", "failed");
         for (JsonNode entry : entries) {
             String type = entry.path("type").asString("");
-            if ("run_state".equals(type)) summary.put("status", entry.path("status").asString("failed"));
+            if ("run_state".equals(type) && header.path("runId").asString("").equals(entry.path("runId").asString(""))) summary.put("status", entry.path("status").asString("failed"));
             if ("report".equals(type)) summary.put("title", entry.path("report").path("title").asString(""));
         }
         return summary;
