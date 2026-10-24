@@ -4,6 +4,7 @@ validate_content 是确定性的程序核查（来源/页码/覆盖/图表 ID/�
 """
 
 import json
+import re
 
 from app.core.agent_prompts import REPORT_RULES, REVIEW_SYSTEM, TABLE_RULES
 from app.core.config import ModelServiceError
@@ -89,6 +90,16 @@ def normalize_table(table, index, fixes):
 
 MAX_SECTIONS = 12
 
+# 预兆名称不进报告正文（用户要求）。括号或冒号前的名称直接去掉；句中的换成对应视角的普通说法。
+OMEN_NAMES = {"崇高预兆": "深入理解", "远古预兆": "历史对照", "机遇预兆": "未来变化", "深渊回响预兆": "风险与反方", "深渊回响": "风险与反方"}
+OMEN_PATTERN = "|".join(sorted(map(re.escape, OMEN_NAMES), key=len, reverse=True))
+
+
+def strip_omen_names(text):
+    text = re.sub(rf"[（(]\s*(?:{OMEN_PATTERN})(?:视角)?\s*[)）]", "", text)
+    text = re.sub(rf"(?:{OMEN_PATTERN})(?:视角)?\s*[：:·]\s*", "", text)
+    return re.sub(OMEN_PATTERN, lambda m: OMEN_NAMES[m.group(0)], text)
+
 
 def merge_extra_sections(data, fixes):
     """超过 12 节时把多出的章节并入第 12 节：标题保留为小标题、正文全保留，引用/图表/表格合并到 schema 上限。
@@ -132,6 +143,12 @@ def normalize_report(raw):
         data = data["candidate"]
         fixes.append("报告外层多包了一层 candidate，已去掉")
     merge_extra_sections(data, fixes)
+    named = 0
+    for holder, key in [(data, "title"), (data, "summary")] + [(s, k) for s in data.get("sections") or [] if isinstance(s, dict) for k in ("heading", "content")]:
+        if isinstance(holder.get(key), str) and re.search(OMEN_PATTERN, holder[key]):
+            holder[key], named = strip_omen_names(holder[key]), named + 1
+    if named:
+        fixes.append(f"{named} 处正文/标题出现预兆名称，已改为普通说法")
     for i, section in enumerate(data.get("sections") or []):
         if not isinstance(section, dict):
             continue

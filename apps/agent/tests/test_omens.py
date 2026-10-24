@@ -69,6 +69,22 @@ class OmenStrategy(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertTrue(coverage["opportunity"]["skillsRead"])
         self.assertGreaterEqual(coverage["abyssal_echoes"]["planChecks"], 2)
 
+    def test_omen_names_do_not_appear_in_report_text(self):
+        # F2：预兆名称不进标题、摘要与正文；预兆只体现在章节 omens 标记与覆盖面板。
+        from app.services.runner_report import normalize_report
+
+        sections = [section("深渊回响：乐观叙事与反方证据", "从远古预兆视角看，公司处在第三次跃迁；机遇与风险并存。", omens=["abyssal_echoes"]),
+                    section("催化窗口（机遇预兆）", "正文", omens=["opportunity"])]
+        draft = {**report(sections), "summary": "本次启用崇高预兆。"}
+        data = json.loads(normalize_report(json.dumps(draft, ensure_ascii=False))[0])
+        text = json.dumps(data, ensure_ascii=False)
+        for name in ("深渊回响", "远古预兆", "机遇预兆", "崇高预兆"):
+            self.assertNotIn(name, text.replace('"abyssal_echoes"', ""))
+        self.assertEqual(data["sections"][0]["heading"], "乐观叙事与反方证据")
+        self.assertIn("历史对照视角", data["sections"][0]["content"])
+        self.assertIn("机遇与风险并存", data["sections"][0]["content"])  # 普通用词不受影响
+        self.assertEqual(data["sections"][0]["omens"], ["abyssal_echoes"])
+
     async def test_writing_instruction_lists_selected_omens(self):
         model = FakeModel(final=omen_report(), ready=True)
         job, runner = self.runner(model, omens=["opportunity", "abyssal_echoes"])

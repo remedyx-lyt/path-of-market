@@ -32,7 +32,7 @@ class OmenMixin:
         omens = self.omens()
         if not omens:
             return "本次未选择预兆：sections 的 omens 留空数组，omenCoverage 输出 []。"
-        lines = ["本次启用预兆（报告开头的 summary 要列出本次启用的预兆及观察角度）："]
+        lines = ["本次启用预兆。预兆只决定研究视角，不是报告内容：title、summary、heading、content 都不写预兆名称（崇高/远古/机遇预兆、深渊回响等），用“历史对照”“风险与反方”等普通说法；预兆只体现在章节 omens 标记与 omenCoverage。"]
         for omen in omens:
             lines.append(
                 f'- {omen.id}（{omen.name}）：至少一个章节在 omens 中标记 "{omen.id}"；应覆盖章节 {list(omen.required_sections)}，'
