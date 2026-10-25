@@ -14,6 +14,7 @@ from app.tools.contracts import ToolError
 SITE = "https://www.cninfo.com.cn"
 STATIC = "https://static.cninfo.com.cn"
 SHANGHAI = timezone(timedelta(hours=8))
+MAX_PDF_BYTES = 100_000_000  # 官方图像较多的年报可接近80MB；仍有大小、超时与解析进程边界。
 
 
 def utc_now() -> str:
@@ -202,11 +203,11 @@ class CninfoProvider:
             return None
         title = html.unescape(re.sub(r"<[^>]+>", "", str(item.get("announcementTitle", "")))).strip()
         match = re.search(
-            r"(20[0-9]{2})\s*年?(年度|半年度|第一季度|第三季度)报告(?:全文)?(?:[（(][^）)]*(?:修订|更新|更正|修正)[^）)]*[）)])?$", title
+            r"(20[0-9]{2})\s*年?(年度|年报|半年度|第一季度|第三季度)报告(?:全文)?(?:[（(][^）)]*(?:修订|更新|更正|修正)[^）)]*[）)])?$", title
         )
         if not match or int(match[1]) not in years or any(word in title for word in ("摘要", "英文", "取消", "撤销", "关于", "公告")):
             return None
-        report_type = {"年度": "annual", "半年度": "interim", "第一季度": "q1", "第三季度": "q3"}[match[2]]
+        report_type = {"年度": "annual", "年报": "annual", "半年度": "interim", "第一季度": "q1", "第三季度": "q3"}[match[2]]
         if report_type not in (report_types or ["annual"]):
             return None
         try:
@@ -246,4 +247,4 @@ class CninfoProvider:
         }
 
     def download(self, url: str) -> bytes:
-        return self.transport.get_bytes(url, maximum=40_000_000)
+        return self.transport.get_bytes(url, maximum=MAX_PDF_BYTES)

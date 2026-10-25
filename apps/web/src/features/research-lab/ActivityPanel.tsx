@@ -20,6 +20,7 @@ for (const type of ['compaction_started', 'compaction_completed', 'compaction_fa
 for (const type of ['memory_loaded', 'memory_disabled', 'memory_unavailable', 'memory_suggested']) NOTES.add(type)
 for (const type of ['mcp_search_started', 'mcp_search_finished', 'mcp_fetch_started', 'mcp_fetch_finished']) NOTES.add(type)
 for (const type of ['annual_history_lookup', 'annual_history_found']) NOTES.add(type)
+NOTES.add('annual_history_recheck_failed')
 
 type Item =
   | { kind: 'phase'; id: string; text: string }

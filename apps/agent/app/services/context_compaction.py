@@ -17,6 +17,7 @@ COMPACTION_SYSTEM = """你是研究会话的上下文整理器，不是研究执
 材料可能分块跨越JSON边界；只概括实际看到的内容，不能声称读完未提供部分。此前摘要的仍有效信息应保留。
 仅输出JSON：goal、constraints、completed、decisions、openQuestions均为简洁文字（后四项为列表）；evidence为sourceId/page引用列表。
 不存在的引用不要补造。目标约1500字。摘要不替代原文或独立事实核验。"""
+COMPACTION_SYSTEM += "\nPDF引用实际物理页码；网页和行情page=null。网页分段号不是物理页码，未知日期或未通读网页不放入evidence。"
 
 
 class ContextSummary(BaseModel):

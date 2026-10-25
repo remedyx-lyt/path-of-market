@@ -1,5 +1,5 @@
 import unittest
-from tests.support import RunnerFixture, FakeModel, DOC_ID
+from tests.support import RunnerFixture, FakeModel, DOC_ID, fixtures
 from app.core.research_history import history_scope
 from app.schemas.agent import AgentResearchRequest
 from app.services.runtime import RunLimits
@@ -47,6 +47,34 @@ class HistoryTests(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         for count in [5, 10]:
             data = build_financial_data(points, history_years=count)
             self.assertEqual([r["year"] for r in data["datasets"][0]["rows"]], list(range(2026-count,2026)))
+
+    def test_official_unusual_annual_title_is_supported_without_summary(self):
+        from datetime import date
+        company = self.tools.provider.resolve_company('同花顺')
+        item = fixtures.announcement(title='某公司2024年年报报告')
+        document = self.tools.provider._document(item, company, [2024], date(2026,10,25))
+        self.assertEqual(document['reportType'], 'annual')
+        self.assertIsNone(self.tools.provider._document({**item, 'announcementTitle': '2024年年报报告摘要'}, company, [2024], date(2026,10,25)))
+
+    async def test_resume_refreshes_missing_years_without_discarding_reading(self):
+        _, runner = self.runner(question='研究公司')
+        await runner.find_documents({'company': '同花顺', 'years': [2024], 'asOfDate': '2026-10-23'})
+        runner.notes['kept'] = [{'summary': 'already read'}]
+        await runner.refresh_missing_history()
+        self.assertEqual(runner.notes['kept'], [{'summary': 'already read'}])
+        self.assertTrue(runner.history_checked)
+        self.assertIn('annual_history_rechecked', runner.messages[-1]['content'])
+
+    def test_large_official_pdf_has_consistent_bounded_download_limit(self):
+        from app.tools.cninfo import MAX_PDF_BYTES, CninfoProvider
+        class Transport:
+            def get_bytes(self, url, *, maximum):
+                self.maximum = maximum
+                return b'%PDF-test'
+        transport = Transport()
+        self.assertEqual(CninfoProvider(transport).download('https://static.cninfo.com.cn/a.PDF'), b'%PDF-test')
+        self.assertEqual(transport.maximum, MAX_PDF_BYTES)
+        self.assertTrue(79_925_886 < MAX_PDF_BYTES <= 100_000_000)
 
 
 if __name__ == "__main__":

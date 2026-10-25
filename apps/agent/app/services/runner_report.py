@@ -296,6 +296,9 @@ class ReportMixin:
                 raise ValueError("基本研究主题缺少：" + ",".join(sorted(missing)) + "；补充分析或明确资料缺口，并标记topics。")
         if not self.sources:
             raise ValueError("尚未取得证据")
+        self.require_evidence(not self.job.request.include_financials or self.annual_context()["count"] <= 2 or self.history_checked,
+                              "尚未完成主公司的五/十年完整年报范围查询，请先find_documents。",
+                              "未完成主公司的五/十年完整年报范围查询。")
         unread = [c for c in self.coverage.values() if not c["textComplete"]]
         self.require_evidence(
             self.coverage and not unread,

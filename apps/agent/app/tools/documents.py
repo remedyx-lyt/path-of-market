@@ -10,7 +10,7 @@ import sys
 from tempfile import NamedTemporaryFile
 import threading
 
-from app.tools.cninfo import utc_now
+from app.tools.cninfo import utc_now, MAX_PDF_BYTES
 from app.tools.contracts import ToolError
 
 
@@ -83,7 +83,7 @@ class DocumentStore:
                     raise ToolError("CACHE_INTEGRITY_ERROR", "缓存 PDF 与校验值不一致，请移除此文件缓存后重试。")
             else:
                 body = provider.download(metadata["sourceUrl"])
-                if len(body) > 40_000_000 or not body.startswith(b"%PDF-"):
+                if len(body) > MAX_PDF_BYTES or not body.startswith(b"%PDF-"):
                     raise ToolError("INVALID_PDF", "来源返回的不是支持的 PDF 文件。")
                 atomic_write(pdf_path, body)
                 metadata.update(sha256=sha256(body).hexdigest(), downloadedAt=utc_now(), byteSize=len(body))

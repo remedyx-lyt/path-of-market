@@ -691,6 +691,7 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
                     # 原任务可能停在一组工具调用的中间；先配齐缺失结果，再继续模型决策。
                     for call in pending_calls(self.messages):
                         await self.run_tool_call(call)
+                    await self.refresh_missing_history()
                     self.messages.append({"role": "user", "content": "继续完成原研究。已保存的阅读、方法与底稿继续有效，不要重新通读已完成资料；仅补必要证据（如行情），然后撰写报告。"})
                     if self.report_candidate or self.writing_state:
                         assistant = ({"role": "assistant", "content": json.dumps(self.report_candidate, ensure_ascii=False)}
