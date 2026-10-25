@@ -34,6 +34,8 @@
 
 默认无需另填key，`.env.example`新增`MCP_WEB_ENABLED`、`MCP_SEARCH_URL`、`MCP_TIMEOUT_SECONDS`。设置`MCP_WEB_ENABLED=false`隐藏两个模型工具；原PDF/行情仍可用。Python `/tools`可查看配置状态，配置不冒充连通成功。实际连接成功/失败显示在活动流。
 
+MCP配置在工具服务初始化时读取，修改后重启Python服务生效；不在运行中的研究里切换连接。全量136项Python检查已通过，另有本轮真实大PDF/特殊标题/缺失年度复查的针对性回归与实际80MB下载解析检查。
+
 程序位置：`app/tools/public_web.py`处理SDK与快照；`app/services/runner_web.py`处理研究阅读；`agent_runner.py`注册/分派；`research_recovery.py`保存分支发现/覆盖；`runner_report.py`、`report_discussion.py`、`context_compaction.py`校验引用。前端`researchSchemas.ts`、`ResearchReport.tsx`、`ActivityPanel.tsx`负责契约、正文覆盖与实际事件。
 
 离线：`python -m unittest tests.test_public_web`，覆盖真实stdio发现/调用、整段获取与阅读、断线接续、未知日期、缓存篡改、工具白名单、关闭开关、完整Agent成稿等13项；`node scripts/check-mcp-web.mjs`7组契约/引用/展示。真实公开MCP：`python scripts/check-mcp.py --live`，实际搜索2条并获取正文成功，模型调用0次。原研究/聊天/压缩/恢复32项隔离HTTP集成通过。

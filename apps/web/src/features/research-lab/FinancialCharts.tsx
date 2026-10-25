@@ -87,7 +87,7 @@ function DataChart({ chart, rows, labels, sources, showDataLabels }: { chart: Fi
         return <g key={key}><path d={d} fill="none" stroke={COLORS[k]} strokeWidth="2.5" />{series.map((v,i) => v == null ? null : <circle key={rows[i].year} cx={x(i)} cy={y(v)} r="4.5" fill={COLORS[k]}><title>{rows[i].periodLabel} · {labels[key]}：{v.toFixed(2)}{unit}</title></circle>)}</g>
       })}
       {showDataLabels && <ChartDataLabels points={labelPoints} bounds={{left:left+2,right:left+plotW-2,top:0,bottom:248}} />}
-      {rows.map((r,i) => <text key={r.year} x={x(i)} y={h-18} textAnchor="middle" fill="#686b63" fontSize="14">{r.periodLabel}</text>)}
+      {rows.map((r,i) => <text key={r.year} x={x(i)} y={h-18} textAnchor="middle" fill="#686b63" fontSize="14"><title>{r.periodLabel}</title>{rows.length > 5 ? r.year : r.periodLabel}</text>)}
     </svg></div>
     <p className="chart-source">来源：{sources.filter((s) => sourceIds.has(s.sourceId)).map((s,i) => <span key={s.sourceId}>{i>0?'；':''}<a href={s.url} target="_blank" rel="noreferrer">{s.title} ↗</a></span>)}；计算及页码见数据表。</p>
   </figure>
