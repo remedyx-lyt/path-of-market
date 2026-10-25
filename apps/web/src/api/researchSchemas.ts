@@ -216,6 +216,11 @@ export const jobSchema = z.object({
   report: agentReportSchema.nullable(),
 })
 
+/** 历史活动读取不依赖旧版报告的schema；只验证活动实际需要的字段。 */
+export const activityJobSchema = jobSchema.pick({ taskId: true, status: true, progress: true, modelCalls: true, events: true }).extend({
+  target: str, phase: str.optional(), usage: z.record(str, finite.nonnegative()), parentTaskId: str.regex(/^[0-9a-f-]{36}$/i).nullish(),
+})
+
 /** 研究记录列表（M2-1，来自 Java SessionStore）。 */
 export const sessionListSchema = z.object({
   sessions: z.array(z.object({ sessionId: str, runId: str, createdAt: str, target: str, question: str, status: str, title: str.optional() })),

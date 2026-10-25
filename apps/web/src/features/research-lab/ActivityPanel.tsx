@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { JobEvent, ResearchJob } from '../../api/research'
+import type { JobEvent, ResearchActivity } from '../../api/research'
 
 const PHASES = [
   { id: 'methods', label: '读方法与计划' },
@@ -30,7 +30,7 @@ NOTES.add('evidence_pending')
 type Item =
   | { kind: 'phase'; id: string; text: string }
   | { kind: 'tool'; id: string; label: string; summary: string; status: string; result?: string; durationMs?: number; progress?: string }
-  | { kind: 'model'; id: string; text: string; durationMs?: number; tokens?: number; running: boolean; failed?: boolean }
+  | { kind: 'model'; id: string; text: string; call?: number; durationMs?: number; tokens?: number; running: boolean; failed?: boolean }
   | { kind: 'decision' | 'note'; id: string; text: string; warn?: boolean }
   | { kind: 'section'; id: string; text: string; done: boolean; failed?: boolean }
 
@@ -58,8 +58,8 @@ export function timeline(events: JobEvent[]): Item[] {
       runningTool = null
     } else if (e.type === 'reading_processed' && runningTool) {
       runningTool.progress = e.message.replace(/^.*?：/, '')
-    } else if (e.type === 'model_started' && e.modelCall != null && e.purpose !== '决定下一步' && e.purpose !== '阅读原文') {
-      const item = { kind: 'model' as const, id: e.id, text: e.purpose ?? e.message, running: true }
+    } else if (e.type === 'model_started' && e.modelCall != null) {
+      const item = { kind: 'model' as const, id: e.id, call: e.modelCall, text: e.purpose ?? e.message, running: true }
       models.set(e.modelCall, item); items.push(item)
     } else if (e.type === 'model_finished' && e.modelCall != null && models.has(e.modelCall)) {
       Object.assign(models.get(e.modelCall)!, { running: false, durationMs: e.durationMs, tokens: e.usage?.total_tokens })
@@ -88,7 +88,7 @@ export function timeline(events: JobEvent[]): Item[] {
   return items
 }
 
-export function ActivityPanel({ job, live }: { job: ResearchJob; live: boolean }) {
+export function ActivityPanel({ job, live }: { job: ResearchActivity; live: boolean }) {
   const listRef = useRef<HTMLOListElement>(null)
   const items = timeline(job.events)
   const current = PHASES.findIndex((p) => p.id === job.phase)
@@ -124,7 +124,7 @@ export function ActivityPanel({ job, live }: { job: ResearchJob; live: boolean }
       </li>
       if (item.kind === 'model') return <li key={item.id} className={`activity-model${item.running ? ' is-running' : ''}`}>
         <span className="activity-mark" aria-hidden="true">{item.running ? '◌' : item.failed ? '✕' : '✓'}</span>
-        <div><strong>模型</strong> {item.text}<small>{item.running ? '进行中…' : [seconds(item.durationMs), item.tokens ? `${item.tokens.toLocaleString()} tokens` : ''].filter(Boolean).join(' · ')}</small></div>
+        <div><strong>模型 #{item.call}</strong> {item.text}<small>{item.running ? '进行中…' : [seconds(item.durationMs), item.tokens ? `${item.tokens.toLocaleString()} tokens` : ''].filter(Boolean).join(' · ')}</small></div>
       </li>
       if (item.kind === 'section') return <li key={item.id} className={`activity-section${item.done || item.failed ? '' : ' is-running'}`}>
         <span className="activity-mark" aria-hidden="true">{item.failed ? '✕' : item.done ? '✓' : '✎'}</span><div>{item.failed ? `${item.text}（本次输出未完成）` : item.done ? item.text.replace(/^正在写/, '已写').replace(/^正在整理表/, '已整理表') : item.text}</div>

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { DraftErrors, ReportOmen, ResearchDraft } from '../features/research-lab/researchDraft'
-import { agentReportSchema, errorBodySchema, jobSchema, mockReportSchema, modelReportSchema, sessionListSchema, validationIssueSchema } from './researchSchemas'
+import { activityJobSchema, agentReportSchema, errorBodySchema, jobSchema, mockReportSchema, modelReportSchema, sessionListSchema, validationIssueSchema } from './researchSchemas'
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -91,6 +91,7 @@ export type JobEvent = {
   durationMs?: number; modelCall?: number; purpose?: string; usage?: Record<string, number>; title?: string
   focus?: string; checks?: { question: string; topic: string; omen?: string | null }[]
   summaryText?: string; beforeCharacters?: number; afterCharacters?: number; compactionCount?: number
+  parentTaskId?: string; previousModelCalls?: number
 }
 export type ResearchJob = {
   taskId: string; status: 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'; target: string
@@ -101,6 +102,7 @@ export type ResearchJob = {
   events: JobEvent[]
   report: AgentResearchReport | null; error: { code: string; message: string } | null
 }
+export type ResearchActivity = Pick<ResearchJob, 'taskId' | 'status' | 'target' | 'progress' | 'modelCalls' | 'usage' | 'phase' | 'events' | 'parentTaskId'>
 export type ResearchReport = MockResearchReport | ModelResearchReport | AgentResearchReport
 export type ResearchMode = 'mock' | 'model' | 'agent'
 
@@ -214,7 +216,7 @@ export async function generateReport(draft: ResearchDraft, signal: AbortSignal, 
 }
 
 
-async function jobRequest(path: string, method: string, signal?: AbortSignal, body?: unknown): Promise<ResearchJob> {
+async function jobRequest(path: string, method: string, signal?: AbortSignal, body?: unknown, activityOnly = false): Promise<ResearchJob> {
   let response: Response
   try {
     response = await fetch(`/api/research/jobs${path}`, { method, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
@@ -231,7 +233,7 @@ async function jobRequest(path: string, method: string, signal?: AbortSignal, bo
     const extra: Record<string, string> = { RESEARCH_BUSY: '已有研究正在运行，请先恢复或停止该任务。', RESEARCH_NOT_FOUND: '任务不存在或服务已重启，请重新开始。' }
     throw new ResearchApiError(ERROR_MESSAGES[code] || extra[code] || '研究任务未能完成。', code)
   }
-  if (!jobSchema.safeParse(result).success) throw new ResearchApiError('任务或报告格式不正确。', 'INVALID_REPORT')
+  if (!(activityOnly ? activityJobSchema : jobSchema).safeParse(result).success) throw new ResearchApiError('任务或报告格式不正确。', 'INVALID_REPORT')
   return result as ResearchJob
 }
 
@@ -250,6 +252,8 @@ export async function listSessions(signal?: AbortSignal): Promise<SessionSummary
 
 export async function cancelAgentJob(taskId: string) { return jobRequest(`/${taskId}`, 'DELETE') }
 export async function getAgentJob(taskId: string, signal?: AbortSignal) { return jobRequest(`/${taskId}`, 'GET', signal) }
+/** 只读历史活动，不校验/渲染旧报告，不启动模型。 */
+export async function getAgentActivity(taskId: string, signal?: AbortSignal): Promise<ResearchActivity> { return jobRequest(`/${taskId}`, 'GET', signal, undefined, true) }
 
 /** 接续未完成任务，复用已读上下文；会产生新的模型调用，普通查看/恢复轮询不会调用此入口。 */
 export async function continueAgentJob(taskId: string, signal: AbortSignal, onProgress?: (job: ResearchJob) => void) {

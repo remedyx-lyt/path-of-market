@@ -237,6 +237,7 @@ public class SessionStore {
         ArrayNode events = mapper.createArrayNode();
         JsonNode report = null, state = null, followup = null;
         String phase = "queued";
+        String parentTaskId = null;
         int modelCalls = 0;
         for (JsonNode entry : entries) {
             if (!runId.equals(entry.path("runId").asString(""))) continue;
@@ -250,11 +251,13 @@ public class SessionStore {
                 case "report" -> report = entry.path("report");
                 case "chat_turn" -> followup = entry;
                 case "run_state" -> state = entry;
+                case "continuation" -> parentTaskId = entry.path("parentTaskId").asString(null);
                 default -> { }
             }
         }
         ObjectNode snapshot = mapper.createObjectNode();
         snapshot.put("taskId", runId);
+        snapshot.put("parentTaskId", parentTaskId);
         snapshot.set("followup", followup);
         snapshot.put("sessionId", header.path("id").asString(""));
         snapshot.put("target", header.path("request").path("target").asString(""));

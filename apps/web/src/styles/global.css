@@ -350,6 +350,9 @@ button:disabled { opacity: 0.55; cursor: wait; }
 .activity-timeline .activity-note { color: var(--muted); font-size: 12px; padding-left: 28px; }
 .activity-timeline .activity-note.is-warn { color: var(--warn); }
 .activity-replay { margin: 4px 0 18px; font-size: 13px; }
+.activity-run { margin: 12px 0; border: 1px solid #e5e5e5; padding: 12px; min-width: 0; }
+.activity-run > summary { cursor: pointer; font-weight: 600; color: #111; }
+.activity-run .activity-meter { overflow-wrap: anywhere; }
 .activity-replay > summary { cursor: pointer; color: #555; }
 @keyframes activity-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .activity-timeline .is-running .activity-mark { animation: none; } }

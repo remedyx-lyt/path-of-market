@@ -276,7 +276,7 @@ export function ResearchWorkspace() {
           {resumeId && !isGenerating && <button className="text-button" type="button" onClick={() => void resumeResearch()}>恢复上次研究 ↗</button>}
           {job && <div className="research-progress" aria-live="polite">
             <strong>{job.progress}</strong>
-            <p>模型调用 {job.modelCalls} 次{typeof job.usage.total_tokens === 'number' ? ` · 累计 ${job.usage.total_tokens.toLocaleString()} token` : ''}</p>
+            <p>本次模型调用 {job.modelCalls} 次{typeof job.usage.total_tokens === 'number' ? ` · 本次 ${job.usage.total_tokens.toLocaleString()} tokens` : ''}</p>
             {job.coverage.map((entry) => <p key={entry.sourceId}>{entry.unit === 'segment' ? `${entry.processedCharacters}/${entry.fetchedCharacters ?? '?'} 字网页正文已处理` : `${entry.processedPages.length}/${entry.pageCount} 页已处理`}{entry.textComplete ? ' · 文本阅读完成' : entry.readingComplete ? ` · 阅读完成（${entry.emptyTextPages.length}页已视觉补读）` : ''}</p>)}
             <details><summary>查看最近动作</summary><ol>{job.events.slice(-8).map((entry) => <li key={entry.id}>{entry.message}</li>)}</ol></details>
           </div>}
