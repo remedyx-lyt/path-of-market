@@ -423,42 +423,59 @@ class ReportMixin:
             "market": {k: v for k, v in (self.market_data or {}).items() if k != "series"},
         }
 
+    def apply_review_changes(self, content, body):
+        """精确匹配的局部补丁；歧义、重复和截断不能覆盖原稿。"""
+        if set(body) - {"changes", "summary"} or not isinstance(body.get("changes"), list) or len(body["changes"]) > 24:
+            raise ValueError("复核仅允许changes数组与可选summary")
+        candidate = content.model_dump(by_alias=True)
+        for patch in body["changes"]:
+            if not isinstance(patch, dict) or set(patch) - {"sectionIndex", "field", "oldText", "newText"}:
+                raise ValueError("复核补丁字段无效")
+            index, field = patch.get("sectionIndex"), patch.get("field", "content")
+            old, new = patch.get("oldText"), patch.get("newText")
+            if (type(index) is not int or not 0 <= index < len(candidate["sections"]) or field not in {"heading", "content"}
+                    or not isinstance(old, str) or not old or len(old) > 5000 or not isinstance(new, str) or len(new) > 6000):
+                raise ValueError("复核补丁序号/字段/文字长度无效")
+            text = candidate["sections"][index][field]
+            if text.count(old) != 1:
+                raise ValueError("复核oldText须在当前章节逐字且唯一匹配")
+            candidate["sections"][index][field] = text.replace(old, new, 1)
+        if "summary" in body:
+            candidate["summary"] = body["summary"]
+        return self.validate_content({"content": json.dumps(candidate, ensure_ascii=False)})
+
     async def review(self, content):
         self.enter_phase("review", "阶段：复核报告")
         self.job.emit("report_review", "核对报告文字、资料范围与行情计算口径")
-        try:
-            message = await self.model(
-                [
+        messages = [
                     {"role": "system", "content": REVIEW_SYSTEM},
                     {"role": "user", "content": json.dumps(self.review_payload(content), ensure_ascii=False)},
-                ],
-                report=True,
-            )
-        except ModelServiceError as error:
-            if error.code not in {"MODEL_UPSTREAM_ERROR", "MODEL_INVALID_RESPONSE", "MODEL_TIMEOUT"}:
-                raise
-            # 复核调用本身失败（如输出不完整）：保留已通过核查的报告，不让复核拖垮整个任务。
-            self.job.emit("review_discarded", "复核调用未完成，保留复核前的报告：" + error.message)
-            self.review_outcome = "discarded"
-            return content
-        try:
-            unchanged = json.loads(message.get("content") or "{}") == {"unchanged": True}
-        except ValueError:
-            unchanged = False
-        # 无需修改时复核只回一个标记，省去整篇报告的重复输出；有修改则重新做全部程序核查。
-        outcome, revised = "unchanged", content
-        if not unchanged:
+                ]
+        outcome, revised = "discarded", content
+        for attempt in range(2):
             try:
-                candidate = self.validate_content(message)
-                if len(candidate.sections) != len(content.sections):
-                    raise ValueError("复核改变了章节数量，无法对应原有数据表")
-                for before, after in zip(content.sections, candidate.sections):
-                    after.tables = before.tables  # 数据表不经复核，原样挂回
-                outcome, revised = "revised", candidate
-            except ValueError as error:
-                # 复核稿未通过程序核查：保留已通过核查的写作稿，不让一次失败的复核作废整篇报告。
-                outcome = "discarded"
-                self.job.emit("review_discarded", "复核稿未通过核查，保留复核前的报告：" + str(error)[:200])
+                message = await self.model(messages, report=True)
+                write_json(self.tools.store.root / "review-replies" / f"{self.job.task_id}-{self.job.model_calls}.json", {"reply": message.get("content")})
+                body = json.loads(message.get("content") or "{}")
+                if body == {"unchanged": True}:
+                    outcome = "unchanged"
+                else:
+                    candidate = self.apply_review_changes(content, body) if isinstance(body, dict) and "changes" in body else self.validate_content(message)
+                    if len(candidate.sections) != len(content.sections):
+                        raise ValueError("复核改变了章节数量，无法对应原有数据表")
+                    for before, after in zip(content.sections, candidate.sections):
+                        after.tables = before.tables
+                    outcome, revised = "revised", candidate
+                break
+            except (ModelServiceError, ValueError) as error:
+                if isinstance(error, ModelServiceError) and error.code not in {"MODEL_UPSTREAM_ERROR", "MODEL_INVALID_RESPONSE", "MODEL_TIMEOUT", "MODEL_UNAVAILABLE"}:
+                    raise
+                detail = error.message if isinstance(error, ModelServiceError) else str(error)[:300]
+                if attempt == 0:
+                    self.job.emit("review_retry", "复核未完成：仅重试局部修改，不重写正文", reason=detail)
+                    messages = messages + [{"role": "user", "content": '上一条未通过：'+detail+'。只输出一个JSON对象：无需修改用{"unchanged":true}，有问题用changes精确文字补丁。不要重写整个报告。'}]
+                else:
+                    self.job.emit("review_discarded", "复核未完成，保留已通过程序核查的原稿，可仅重试复核：" + detail)
         if self.method_usage and outcome != "discarded":
             # 计划失败时保留 plan_failed，不能因为复核过就显示为“已计划并复核”。
             self.method_usage["reviewed"] = True

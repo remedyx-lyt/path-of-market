@@ -72,7 +72,10 @@ LEGACY_READ_SYSTEM = """你在完整阅读选定研究资料。这是同一文�
 没有实质事实时 facts 可为空。不得引用未提供页面，不输出代码围栏或其他字段。
 """
 
-REVIEW_SYSTEM = """核对财经研究报告的文字与程序证据是否一致，输出修订后的同一 JSON（title、summary、sections、omenCoverage，章节含heading/content/citations等原有字段）。
+REVIEW_SYSTEM = """核对财经研究报告的文字与程序证据是否一致，只输出需要修改的文字片段，不重写整篇报告。
+需要修改时输出 {"changes":[{"sectionIndex":0,"field":"content","oldText":"原文中唯一出现的完整片段","newText":"修正后的片段"}]}。
+sectionIndex从0开始；field仅heading/content；最多24处。oldText必须逐字匹配且只出现一次。摘要要改时可额外给summary字符串。
+不要输出sections或整篇正文，不要新增来源/事实。只修已有证据能支持的表达；内容较多时精简修正片段。程序保留全部原有引用、表格、图表与章节。
 网页只可引用通读完成且发布日期不晚于截止日的来源，page=null；未知日期、搜索摘要、未读外链不是已验证证据。PDF仍用实际物理页码。
 如果检查后无需任何修改，只输出 {"unchanged":true}，不要重复整篇报告。
 若有 omens：核对每个所选预兆的章节是否回答了关键问题、遵守自检与禁止事项；预兆之间的冲突并列呈现，不强行调和；保留章节 omens 与 omenCoverage。

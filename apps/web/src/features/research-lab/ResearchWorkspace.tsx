@@ -137,7 +137,7 @@ export function ResearchWorkspace() {
   }
 
   async function continueResearch() {
-    if (report?.mode !== 'agent' || report.run.status !== 'partial' || requestRef.current) return
+    if (report?.mode !== 'agent' || (report.run.status !== 'partial' && report.run.reviewOutcome !== 'discarded') || requestRef.current) return
     const controller = new AbortController()
     requestRef.current = controller
     dispatch({ type: 'resumeStarted' })

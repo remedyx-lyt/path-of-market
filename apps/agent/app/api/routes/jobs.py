@@ -8,10 +8,10 @@ from fastapi.responses import JSONResponse
 from app.core.config import ModelServiceError, load_model_settings
 from app.schemas.agent import AgentResearchRequest
 from app.schemas.discussion import FollowupRequest
-from app.services.report_discussion import DiscussionRunner, prepare_followup
+from app.services.report_discussion import DiscussionRunner, prepare_followup, load_entries
 from app.services.research_jobs import ResearchJob
 from app.services.research_jobs import job_store
-from app.services.research_recovery import load_recovery, recovery_error
+from app.services.research_recovery import load_recovery, recovery_error, can_retry_review
 from app.tools.registry import get_research_tools
 
 router = APIRouter(prefix="/research/jobs", tags=["研究 Agent"])
@@ -97,9 +97,11 @@ async def continue_job(task_id: UUID):
         if existing:
             return existing.snapshot()
         settings = load_model_settings()
-        recovery = await asyncio.to_thread(load_recovery, get_research_tools(), str(task_id))
+        recovery = await asyncio.to_thread(load_recovery, get_research_tools(), str(task_id), allow_completed=True)
         if recovery.get("status") == "completed":
-            raise recovery_error("研究已完成，无需接续。")
+            report = parent.report if parent else next((e.get("report") for e in reversed(await asyncio.to_thread(load_entries, str(task_id))) if e.get("type") == "report"), None)
+            if not can_retry_review(recovery, report):
+                raise recovery_error("研究已完成，无需接续。")
         if recovery.get("model") and recovery["model"] != settings.model:
             raise recovery_error("当前模型与原任务不同，请恢复原模型配置后接续。")
         if recovery.get("baseUrl") and recovery["baseUrl"] != settings.base_url:

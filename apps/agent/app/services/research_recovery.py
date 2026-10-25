@@ -19,7 +19,7 @@ STATE_FIELDS = (
     "notes", "sources", "coverage", "discovered", "web_discovered", "current_period_checked", "required_current", "current_period_gap",
     "market_data", "visual_readings", "extraction_readings", "financial_points", "financial_gaps", "segment_points",
     "business_gaps", "method_usage", "action_counts", "report_candidate", "table_gaps", "wrapup_gaps", "restored_financial",
-    "writing_state", "writer_tools_rejected", "report_stage",
+    "writing_state", "writer_tools_rejected", "report_stage", "review_outcome",
     "compaction_state", "compaction_count",
     "history_checked", "required_annual", "history_gap",
 )
@@ -28,6 +28,12 @@ SET_FIELDS = ("financial_checked", "detail_checked")
 
 def recovery_error(message):
     return ModelServiceError("RESEARCH_NOT_RESUMABLE", message, 409)
+
+
+def can_retry_review(recovery, report):
+    state = recovery.get("state", {})
+    return (recovery.get("status") == "completed" and (report or {}).get("run", {}).get("reviewOutcome") == "discarded"
+            and state.get("report_stage") == "tables" and bool(state.get("report_candidate")))
 
 
 def checkpoint_path(tools, task_id):

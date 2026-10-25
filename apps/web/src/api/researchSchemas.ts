@@ -84,7 +84,7 @@ const financialRow = z.object({
 
 const financialData = z.object({
   schemaVersion: z.literal(1),
-  datasets: z.array(z.object({ id: period, label: str, rows: z.array(financialRow).max(3).refine(increasingYears, '年份需递增') })).max(4)
+  datasets: z.array(z.object({ id: period, label: str, rows: z.array(financialRow).max(10).refine(increasingYears, '年份需递增') })).max(4)
     .refine((sets) => new Set(sets.map((d) => d.id)).size === sets.length, '数据集 ID 重复'),
   labels: z.record(z.string(), str), method: str, gaps: strings,
   charts: z.array(z.object({
@@ -110,7 +110,7 @@ const businessData = z.object({
   schemaVersion: z.literal(1), method: str, gaps: strings,
   datasets: z.array(z.object({
     id: str, label: str, dimension: z.enum(['product', 'geography', 'industry']), period,
-    rows: z.array(businessRow).min(1).max(3).refine(increasingYears, '年份需递增'),
+    rows: z.array(businessRow).min(1).max(10).refine(increasingYears, '年份需递增'),
   })).max(12).refine((sets) => new Set(sets.map((d) => d.id)).size === sets.length, '数据集 ID 重复'),
 })
 

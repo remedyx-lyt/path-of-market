@@ -9,6 +9,7 @@ type Props = { draft: ResearchDraft | null; report: Report | null; isGenerating:
 
 export function ResearchPreview({ draft, report, isGenerating, hasError, job, onContinue }: Props) {
   const partial = report?.mode === 'agent' && report.run.status === 'partial'
+  const retryReview = report?.mode === 'agent' && report.run.status === 'completed' && report.run.reviewOutcome === 'discarded'
   const status = isGenerating ? '研究进行中' : hasError ? '生成失败' : partial ? '研究未完成 · 进展已保存' : report ? '报告已返回' : draft ? '任务已预览' : '等待输入'
   return (
     <aside className={`research-preview${report ? ' research-preview--report' : ''}${report?.mode === 'agent' ? ' research-preview--agent' : ''}`} aria-label={report ? report.mode === 'agent' ? '真实研究报告' : report.mode === 'model' ? '模型分析报告' : '演示研究报告' : '研究任务预览'} aria-busy={isGenerating}>
@@ -20,6 +21,7 @@ export function ResearchPreview({ draft, report, isGenerating, hasError, job, on
         </span>
       </div>
       {partial && onContinue && !isGenerating && <div className="continuation-actions"><button className="primary-button" type="button" onClick={onContinue}>从已保存进度继续 →</button><p>保留已读资料与证据，继续补查和写作；会产生新的模型调用。</p></div>}
+      {retryReview && onContinue && !isGenerating && <div className="continuation-actions"><button className="primary-button" type="button" onClick={onContinue}>仅重试报告复核 →</button><p>正文和表格已保留，模型复核尚未完成。仅重新复核，会产生模型调用。</p></div>}
       {report && job?.events.length ? <details className="activity-replay" open={isGenerating || undefined}><summary><strong>查看研究过程与工具记录</strong><span>{job.modelCalls} 次模型调用 · 展开回放</span></summary><ActivityPanel job={job} live={isGenerating} /></details> : null}
       {report ? report.mode === 'agent' ? <ReportWorkbench key={report.run.taskId} report={report} /> : <ResearchReport report={report} /> : job?.events.length ? <><h2>{job.target}</h2><ActivityPanel job={job} live={isGenerating} /></> : <>
       <h2>这次研究，<br />关注什么？</h2>

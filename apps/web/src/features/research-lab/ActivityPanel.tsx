@@ -24,6 +24,7 @@ NOTES.add('annual_history_recheck_failed')
 NOTES.add('scan_reading')
 NOTES.add('writing_deferred')
 for (const type of ['decision_retry', 'decision_to_writing', 'resume_ready_to_write', 'writing_unit_recovered']) NOTES.add(type)
+NOTES.add('review_retry')
 NOTES.add('evidence_pending')
 
 type Item =

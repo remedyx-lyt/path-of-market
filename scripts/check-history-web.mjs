@@ -4,11 +4,31 @@ import { createRequire } from 'node:module'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
+import { pathToFileURL } from 'node:url'
 const root = path.resolve(import.meta.dirname, '..')
 const require = createRequire(import.meta.url)
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright'))
 const files = process.argv.slice(2)
 assert.ok(files.length, '提供已完成任务JSON文件路径')
+const webRequire = createRequire(path.join(root, 'apps/web/package.json'))
+const { createServer } = await import(pathToFileURL(webRequire.resolve('vite')).href)
+const vite = await createServer({ root: path.join(root, 'apps/web'), server: { middlewareMode: true }, appType: 'custom' })
+try {
+  const { jobSchema } = await vite.ssrLoadModule('/src/api/researchSchemas.ts')
+  for (const file of files) {
+    const saved = JSON.parse(await fs.readFile(path.resolve(root, file), 'utf8'))
+    const parsed = jobSchema.safeParse(saved)
+    assert.ok(parsed.success, JSON.stringify(parsed.error?.issues.map(i => ({ path: i.path, message: i.message }))))
+    // 纯结构夹具：验证五/十年与前端约束一致；不把复制行当成真实报告或展示给用户。
+    const fixture = structuredClone(saved), rows = fixture.report.financialData?.datasets[0]?.rows
+    if (rows?.length) {
+      fixture.report.financialData.datasets[0].rows = Array.from({ length: 10 }, (_, i) => ({ ...structuredClone(rows[0]), year: 2016+i }))
+      assert.ok(jobSchema.safeParse(fixture).success, '前端必须支持十年财务行')
+      fixture.report.financialData.datasets[0].rows.push({ ...structuredClone(rows[0]), year: 2026 })
+      assert.equal(jobSchema.safeParse(fixture).success, false, '前端仍保留最多十年的边界')
+    }
+  }
+} finally { await vite.close() }
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
 try {
   for (const file of files) {

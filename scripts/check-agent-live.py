@@ -74,7 +74,7 @@ if __name__ == "__main__":
                 "stopReason": report.get("run", {}).get("stopReason"), "error": job.get("error")}, ensure_ascii=False), flush=True)
             if job["status"] == "completed":
                 assert report["mode"] == "agent" and report["marketData"]["series"]
-                assert report["sources"] and report["toolCalls"] and all(c.get("readingComplete", c["textComplete"]) for c in report["coverage"])
+                assert report["sources"] and (report["toolCalls"] or job.get("parentTaskId")) and all(c.get("readingComplete", c["textComplete"]) for c in report["coverage"])
                 if args.require_financials:
                     assert report.get('financialData',{}).get('datasets') and report.get('visualReadings') and report.get('researchSkill')
                     assert any(d['id']=='annual' for d in report['financialData']['datasets'])
