@@ -32,9 +32,11 @@ export function BusinessCharts({ data, sources, ids, showDataLabels = true }: { 
       })
       const sourceLink = (sourceId: string | undefined,page: number | null | undefined) => {
         const s=sources.find((s) => s.sourceId===sourceId)
-        return s && page ? <a href={`${s.url}#page=${page}`} target="_blank" rel="noreferrer" title={s.title}>{s.title} · PDF第{page}页 ↗ </a> : null
+        if (!s) return null
+        return page ? <a href={`${s.url}#page=${page}`} target="_blank" rel="noreferrer" title={s.title}>{s.title} · PDF第{page}页 ↗ </a>
+          : <a href={s.url} target="_blank" rel="noreferrer" title={s.title}>{s.title} ↗ </a>
       }
-      const refs = (rows: typeof dataset.rows) => [...new Set(rows.flatMap((r) => [r.totalEvidence,...r.items.filter((p) => !p.derived)].map((e) => `${e.sourceId}:${e.page}`)))].map((ref) => { const [id,page]=ref.split(':');return <span key={ref}>{sourceLink(id,Number(page))}</span> })
+      const refs = (rows: typeof dataset.rows) => [...new Set(rows.flatMap((r) => [r.totalEvidence,...r.items.filter((p) => !p.derived)].map((e) => `${e.sourceId}:${e.page}`)))].map((ref) => { const [id,page]=ref.split(':');return <span key={ref}>{sourceLink(id,page === 'null' ? null : Number(page))}</span> })
       let offset=0
       return <div key={dataset.id} className="business-dataset">
         <div className="financial-grid">

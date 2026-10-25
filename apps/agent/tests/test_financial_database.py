@@ -60,7 +60,9 @@ class Merge(unittest.TestCase):
                     "verificationOrigin": "financial_database"}
         report = {**database, "value": 3.9e9, "sourceId": DOC_ID, "page": 8, "rawValue": "39.00", "unit": "亿元", "quote": "营业收入 39.00",
                   "verification": "text_quote_and_number_match", "verificationOrigin": "automatic_financial_summary"}
-        data = build_financial_data([report, database])
+        stale = ["2025年度营业收入未与本页文字数字匹配，未画图。", "2025年度研发投入未与本页文字数字匹配，未画图。"]
+        data = build_financial_data([report, database], stale)
+        self.assertEqual(data["gaps"], stale[1:])  # 结构化报表已覆盖的指标不再报年报取数失败
         row = data["datasets"][0]["rows"][0]
         self.assertEqual(row["values"]["revenue"], 4.0e9)
         self.assertEqual(row["evidence"]["revenue"]["sourceId"], "akshare-300033")

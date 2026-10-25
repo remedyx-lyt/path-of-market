@@ -125,7 +125,9 @@ def yoy(current, previous):
 
 
 def build_financial_data(points, gaps=(), *, history_years=3):
-    groups, issues = {}, list(gaps)
+    # 结构化报表已有的指标，年报原文取数失败的旧提示不再列出（图已由结构化数画出，提示会误导读者）。
+    covered = {f"{p['year']}{PERIODS[p['period']]}{LABELS[p['metric']]}" for p in points if p.get("verificationOrigin") == "financial_database"}
+    groups, issues = {}, [g for g in gaps if not any(g.startswith(prefix) for prefix in covered)]
     for point in points:
         key = (point["period"], point["year"], point["metric"])
         groups.setdefault(key, []).append(point)

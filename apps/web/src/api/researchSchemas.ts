@@ -94,7 +94,8 @@ const financialData = z.object({
 }).refine((data) => data.charts.every((chart) => data.datasets.some((d) => d.id === chart.datasetId)), '图表引用了不存在的数据集')
 
 const nonNegative = finite.nonnegative()
-const businessEvidence = z.object({ sourceId: str, page: int.positive() })
+// 合并收入总额可能来自结构化财务报表（无页码）；分项收入仍来自年报原页。
+const businessEvidence = z.object({ sourceId: str, page: int.positive().nullable() })
 const businessItem = z.object({
   label: str, value: nonNegative, share: nonNegative.max(100.01), derived: z.boolean(),
   sourceId: z.unknown().optional(), page: z.unknown().optional(),
@@ -186,7 +187,7 @@ export const agentReportSchema = z.object({
   }
   for (const row of report.businessData?.datasets.flatMap((d) => d.rows) ?? []) {
     const evidence = [row.totalEvidence, ...row.items.filter((item) => !item.derived)]
-    if (!evidence.every((e) => documentPage(sources, e.sourceId, Number(e.page)))) fail('业务证据页不在来源范围内')
+    if (!evidence.every((e) => e.page == null ? sources.some((s) => s.kind === 'database' && s.sourceId === e.sourceId) : documentPage(sources, e.sourceId, Number(e.page)))) fail('业务证据来源不在资料范围内')
   }
   if (report.figurePlan != null) {
     const charts = new Set(report.financialData?.charts.map((c) => c.id))
