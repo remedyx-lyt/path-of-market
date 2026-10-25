@@ -544,6 +544,8 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
             if not tables_done:
                 content = await self.add_tables(content)
                 self.report_stage = "tables"
+            elif self.recovery:
+                content = self.recover_saved_tables(content)
             self.report_candidate = content.model_dump(mode="json", by_alias=True)
             self.checkpoint()
             content = await self.review(content)

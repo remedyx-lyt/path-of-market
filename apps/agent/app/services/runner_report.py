@@ -9,7 +9,7 @@ import re
 from app.core.agent_prompts import REVIEW_SYSTEM, TABLE_RULES
 from app.core.config import ModelServiceError
 from app.schemas.agent import AgentContent, Citation, SectionTable
-from app.services.model_json import escape_inner_quotes
+from app.services.model_json import escape_inner_quotes, stable_key
 from app.services.report_figures import check_table, dominant_share, plan_section_figures
 from app.services.runtime import now
 from app.services.reading_coverage import reading_complete, page_read
@@ -390,9 +390,12 @@ class ReportMixin:
         return content
 
     def review_payload(self, content):
+        candidate = content.model_dump(by_alias=True, exclude={"sections": {"__all__": {"tables"}}})
+        for index, section in enumerate(candidate["sections"]):
+            section["sectionIndex"] = index
         return {
             # 数据表已由程序逐格核对，复核只看正文与图表；带上十几张表会让复核整篇重写超出输出上限。
-            "candidate": content.model_dump(by_alias=True, exclude={"sections": {"__all__": {"tables"}}}),
+            "candidate": candidate,
             "asOfDate": self.job.request.as_of_date.isoformat(),
             "discoveredDocuments": [
                 {k: d.get(k) for k in ("documentId", "title", "fiscalYear", "reportType", "publishedAt", "preferred")}
@@ -433,16 +436,36 @@ class ReportMixin:
                 raise ValueError("复核补丁字段无效")
             index, field = patch.get("sectionIndex"), patch.get("field", "content")
             old, new = patch.get("oldText"), patch.get("newText")
-            if (type(index) is not int or not 0 <= index < len(candidate["sections"]) or field not in {"heading", "content"}
+            if (type(index) is not int or index < 0 or field not in {"heading", "content"}
                     or not isinstance(old, str) or not old or len(old) > 5000 or not isinstance(new, str) or len(new) > 6000):
                 raise ValueError("复核补丁序号/字段/文字长度无效")
+            if index >= len(candidate["sections"]) or candidate["sections"][index][field].count(old) != 1:
+                counts = [section[field].count(old) for section in candidate["sections"]]
+                if sum(counts) != 1:
+                    raise ValueError("复核oldText须逐字且唯一匹配，不能猜测目标章节")
+                matches = [i for i, count in enumerate(counts) if count]
+                self.job.emit("review_patch_located", "复核章节编号错位，按全报告唯一原文定位", requestedIndex=index, actualIndex=matches[0])
+                index = matches[0]
             text = candidate["sections"][index][field]
-            if text.count(old) != 1:
-                raise ValueError("复核oldText须在当前章节逐字且唯一匹配")
             candidate["sections"][index][field] = text.replace(old, new, 1)
         if "summary" in body:
             candidate["summary"] = body["summary"]
         return self.validate_content({"content": json.dumps(candidate, ensure_ascii=False)})
+
+    def parse_review(self, content, raw):
+        body = json.loads(raw or "{}")
+        if body == {"unchanged": True}:
+            return "unchanged", content
+        candidate = self.apply_review_changes(content, body) if isinstance(body, dict) and "changes" in body else self.validate_content({"content": raw})
+        if len(candidate.sections) != len(content.sections):
+            raise ValueError("复核改变了章节数量，无法对应原有数据表")
+        for before, after in zip(content.sections, candidate.sections):
+            after.tables = before.tables
+        return "revised", candidate
+
+    @staticmethod
+    def review_signature(content):
+        return stable_key(content.model_dump(by_alias=True, exclude={"sections": {"__all__": {"tables"}}}))
 
     async def review(self, content):
         self.enter_phase("review", "阶段：复核报告")
@@ -452,20 +475,26 @@ class ReportMixin:
                     {"role": "user", "content": json.dumps(self.review_payload(content), ensure_ascii=False)},
                 ]
         outcome, revised = "discarded", content
-        for attempt in range(2):
+        signature = self.review_signature(content)
+        if self.recovery and self.recovery["state"].get("report_candidate"):
+            previous = AgentContent.model_validate(self.recovery["state"]["report_candidate"])
+            if self.review_signature(previous) == signature:
+                paths = sorted((self.tools.store.root / "review-replies").glob(self.recovery["taskId"] + "-*.json"), key=lambda p: int(p.stem.rsplit("-", 1)[1]))
+                for path in paths:
+                    try:
+                        saved = json.loads(path.read_text(encoding="utf-8"))
+                        if saved.get("inputSha256", signature) != signature:
+                            continue
+                        outcome, revised = self.parse_review(content, saved["reply"])
+                        self.job.emit("review_recovered", "已保存的复核回复经本地重新校验通过，无需再次调用模型")
+                        break
+                    except (OSError, ValueError, KeyError):
+                        continue
+        for attempt in range(2 if outcome == "discarded" else 0):
             try:
                 message = await self.model(messages, report=True)
-                write_json(self.tools.store.root / "review-replies" / f"{self.job.task_id}-{self.job.model_calls}.json", {"reply": message.get("content")})
-                body = json.loads(message.get("content") or "{}")
-                if body == {"unchanged": True}:
-                    outcome = "unchanged"
-                else:
-                    candidate = self.apply_review_changes(content, body) if isinstance(body, dict) and "changes" in body else self.validate_content(message)
-                    if len(candidate.sections) != len(content.sections):
-                        raise ValueError("复核改变了章节数量，无法对应原有数据表")
-                    for before, after in zip(content.sections, candidate.sections):
-                        after.tables = before.tables
-                    outcome, revised = "revised", candidate
+                write_json(self.tools.store.root / "review-replies" / f"{self.job.task_id}-{self.job.model_calls}.json", {"reply": message.get("content"), "inputSha256": signature})
+                outcome, revised = self.parse_review(content, message.get("content"))
                 break
             except (ModelServiceError, ValueError) as error:
                 if isinstance(error, ModelServiceError) and error.code not in {"MODEL_UPSTREAM_ERROR", "MODEL_INVALID_RESPONSE", "MODEL_TIMEOUT", "MODEL_UNAVAILABLE"}:
@@ -483,6 +512,26 @@ class ReportMixin:
                 self.method_usage["status"] = "planned_and_reviewed"
         self.review_outcome = outcome
         return revised
+
+    def recover_saved_tables(self, content):
+        """恢复此前因格式边界被拒绝、现可通过校验的原模型表格；不重新请求或编造数据。"""
+        if not self.recovery:
+            return content
+        seen = {stable_key(t.model_dump(by_alias=True)) for s in content.sections for t in s.tables}
+        recovered = 0
+        for path in sorted((self.tools.store.root / "table-replies").glob(self.recovery["taskId"] + "-*.json")):
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))["reply"]
+                for index, table in self.parse_tables(raw, len(content.sections)):
+                    key = stable_key(table.model_dump(by_alias=True))
+                    if key not in seen and len(content.sections[index].tables) < 3:
+                        content.sections[index].tables.append(table)
+                        seen.add(key); recovered += 1
+            except (OSError, ValueError, KeyError):
+                continue
+        if recovered:
+            self.job.emit("tables_recovered", f"从已保存的原回复恢复{recovered}张通过校验的表，未重新调用模型", count=recovered)
+        return content
 
     def parse_tables(self, raw, section_count):
         """解析数据表回复：每张表单独整理与校验，不合格的去掉并记下原因，不影响其他表和正文。返回 [(章节序号, SectionTable)]。"""

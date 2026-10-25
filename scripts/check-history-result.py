@@ -9,6 +9,7 @@ def check(path, expected):
     job = json.loads(Path(path).read_text(encoding='utf-8'))
     assert job['status'] == 'completed', job['status']
     report = job['report']
+    assert report['run'].get('reviewOutcome') in {'unchanged', 'revised'}, '真实案例须完成模型复核，不能用discarded冒充复核通过'
     scope = report['annualHistory']
     assert scope['count'] == expected
     assert len(scope['requiredDocuments']) == expected and scope['gap'] is None, scope

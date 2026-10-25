@@ -59,7 +59,7 @@ class TableRow(BaseModel):
     cells: list[Annotated[str, Field(max_length=120)]] = Field(min_length=1, max_length=10)
     source_id: str = Field(alias="sourceId", min_length=1, max_length=80, description="本行数字所在资料")
     page: int | None = Field(default=None, ge=1, strict=True, description="本行数字所在 PDF 物理页（行情数据为 null）；程序核对数字确实出现在该页")
-    also_from: list[Citation] = Field(default_factory=list, alias="alsoFrom", max_length=4, description="一行跨多期、数字来自不同报告时补充的来源页")
+    also_from: list[Citation] = Field(default_factory=list, alias="alsoFrom", max_length=12, description="一行跨五/十年、数字来自不同报告时补充的来源页")
     note: str = Field(default="", max_length=200, description="本行口径或计算说明（如“计算值：产量÷产能”）")
 
 

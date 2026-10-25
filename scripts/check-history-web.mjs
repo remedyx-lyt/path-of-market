@@ -53,6 +53,10 @@ try {
     const first = page.locator('.financial-chart').first()
     await first.scrollIntoViewIfNeeded()
     await first.screenshot({ path: path.join(output, 'financial-chart.png') })
+    for (const [name, title] of [['revenue-trend', '年度 · 营业收入'], ['profit-trend', '归母净利润']]) {
+      const chart = page.locator('.financial-chart').filter({ hasText: title }).first()
+      if (await chart.count()) { await chart.scrollIntoViewIfNeeded(); await chart.screenshot({ path: path.join(output, `${name}.png`) }) }
+    }
     for (const width of [1440, 768, 375]) {
       await page.setViewportSize({ width, height: 1050 })
       await page.locator('.report-title').scrollIntoViewIfNeeded()

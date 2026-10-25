@@ -16,7 +16,10 @@ COMPACTION_SYSTEM = """你是研究会话的上下文整理器，不是研究执
 不新增或猜测财务数值，不把推断/缺口变成事实；精确金额、单位、年份由程序底稿和原阅读笔记保存，摘要只引导回查。
 材料可能分块跨越JSON边界；只概括实际看到的内容，不能声称读完未提供部分。此前摘要的仍有效信息应保留。
 仅输出JSON：goal、constraints、completed、decisions、openQuestions均为简洁文字（后四项为列表）；evidence为sourceId/page引用列表。
-不存在的引用不要补造。目标约1500字。摘要不替代原文或独立事实核验。"""
+不存在的引用不要补造。这是固定长度的累计摘要，不把各块摘要顺序拼接。
+全部文字字段合计约600至900个中文字；每个列表最多6项，每项尽量40字以内，evidence最多8处关键定位。
+后续块要合并去重、替换较旧摘要中的重复内容，不能逐块膨胀；精确数值、完整事实仍由程序底稿和原笔记保留，可用工具回查。
+摘要不替代原文或独立事实核验。"""
 COMPACTION_SYSTEM += "\nPDF引用实际物理页码；网页和行情page=null。网页分段号不是物理页码，未知日期或未通读网页不放入evidence。"
 
 
@@ -196,7 +199,11 @@ class CompactionMixin:
                             raise
                         if attempt:
                             raise
-                        request[-1] = {"role": "user", "content": encoded(prompt) + "\n上次摘要无效，请只修正本块，勿新增事实/引用，字段须符合要求。"}
+                        detail = "输出达到上限" if getattr(error, "finish_reason", None) == "length" else str(error)[:180]
+                        self.job.emit("compaction_retry", "摘要未完成：缩短本块累计摘要后重试", chunk=index + 1, reason=detail)
+                        request[-1] = {"role": "user", "content": encoded(prompt) + "\n上次摘要无效：" + detail +
+                            "。只修正当前累计摘要，总文字压缩到400至600字，各数组最多4项，引用最多4处；不要把此前摘要和新块拼成长文。"
+                            "只保留目标、约束、已完成与未解决事项及必要定位，勿新增事实/引用，字段须符合要求。"}
             proposed = {"version": 1, "prefixLength": self.context_prefix_length, "boundary": cut,
                         "digest": digest(self.messages[self.context_prefix_length:cut]), "summary": summary,
                         "beforeCharacters": before, "afterCharacters": 0, "chunks": len(chunks)}

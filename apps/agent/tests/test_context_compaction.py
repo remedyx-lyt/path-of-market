@@ -65,6 +65,27 @@ class Compaction(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after, before)
         self.assertFalse(model.calls)
 
+    async def test_length_failure_retries_with_shorter_cumulative_summary_instruction(self):
+        class Once(SummaryModel):
+            failed = False
+
+            async def __call__(self, settings, messages, **kwargs):
+                if not self.failed:
+                    self.failed = True
+                    self.calls.append((deepcopy(messages), kwargs))
+                    error = ModelServiceError("MODEL_INVALID_RESPONSE", "length", 502)
+                    error.finish_reason = "length"
+                    raise error
+                return await super().__call__(settings, messages, **kwargs)
+
+        job, runner, model = self.make_runner(Once())
+        self.grow(runner)
+        after = await runner.prepare_context(runner.context())
+        self.assertTrue(runner.compaction_state)
+        self.assertIn("400至600字", model.calls[1][0][-1]["content"])
+        self.assertTrue(any(e["type"] == "compaction_retry" for e in job.events))
+        self.assertLess(size(after), size(runner.context()) + 1)
+
     async def test_history_shrinks_without_mutating_evidence_or_raw_messages(self):
         job, runner, model = self.make_runner()
         self.grow(runner)

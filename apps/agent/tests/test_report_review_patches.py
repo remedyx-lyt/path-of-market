@@ -10,6 +10,30 @@ from app.services.research_recovery import can_retry_review, load_recovery
 
 
 class ReviewPatches(RunnerFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_wrong_number_locates_unique_exact_original_text(self):
+        job, runner = self.runner(FakeModel(review={"changes": [{"sectionIndex": 2, "oldText": "原文记录", "newText": "披露记录"}]}))
+        await runner.run()
+        self.assertEqual(job.report["run"]["reviewOutcome"], "revised")
+        self.assertIn("披露记录", job.report["sections"][0]["content"])
+        self.assertTrue(any(e["type"] == "review_patch_located" for e in job.events))
+
+    async def test_paid_reply_is_reused_locally_after_validation_improvement(self):
+        from app.tools.documents import write_json
+        model = FakeModel(review={"changes": [{"sectionIndex": 0, "oldText": "不存在", "newText": "替换"}]})
+        parent, first = self.runner(model)
+        await first.run()
+        path = next((self.tools.store.root / "review-replies").glob(parent.task_id + "-*.json"))
+        write_json(path, {"reply": '{"changes":[{"sectionIndex":2,"oldText":"原文记录","newText":"披露记录"}]}'})
+        recovery = load_recovery(self.tools, parent.task_id, allow_completed=True)
+        model = FakeModel()
+        child = ResearchJob(parent.request)
+        runner = AgentRunner(child, self.tools, SETTINGS, completion=model, recovery=recovery)
+        await runner.run()
+        self.assertEqual(child.status, "completed", child.error)
+        self.assertEqual(model.calls, [])
+        self.assertIn("披露记录", child.report["sections"][0]["content"])
+        self.assertTrue(any(e["type"] == "review_recovered" for e in child.events))
+
     async def test_short_exact_patch_preserves_citations_and_other_sections(self):
         changes = {"changes": [{"sectionIndex": 0, "oldText": "原文记录", "newText": "报告披露记录"}]}
         job, _ = self.runner(FakeModel(review=changes))

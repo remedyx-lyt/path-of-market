@@ -16,7 +16,7 @@ const NOTES = new Set(['current_period_lookup', 'skill_read', 'data_extracted', 
   'review_discarded', 'report_drafting_fallback', 'methods_plan_failed', 'run_partial', 'run_failed', 'run_cancelled'])
 for (const type of ['methods_plan_invalid', 'reading_note_invalid', 'reading_batch_split', 'reading_batch_retry', 'reading_batch_failed']) NOTES.add(type)
 for (const type of ['run_resumed', 'budget_wrapup', 'checkpoint_failed', 'writing_unit_retry', 'writing_unit_failed']) NOTES.add(type)
-for (const type of ['compaction_started', 'compaction_completed', 'compaction_failed', 'compaction_skipped']) NOTES.add(type)
+for (const type of ['compaction_started', 'compaction_completed', 'compaction_failed', 'compaction_skipped', 'compaction_retry']) NOTES.add(type)
 for (const type of ['memory_loaded', 'memory_disabled', 'memory_unavailable', 'memory_suggested']) NOTES.add(type)
 for (const type of ['mcp_search_started', 'mcp_search_finished', 'mcp_fetch_started', 'mcp_fetch_finished']) NOTES.add(type)
 for (const type of ['annual_history_lookup', 'annual_history_found']) NOTES.add(type)
@@ -25,6 +25,7 @@ NOTES.add('scan_reading')
 NOTES.add('writing_deferred')
 for (const type of ['decision_retry', 'decision_to_writing', 'resume_ready_to_write', 'writing_unit_recovered']) NOTES.add(type)
 NOTES.add('review_retry')
+for (const type of ['review_patch_located', 'review_recovered', 'tables_recovered']) NOTES.add(type)
 NOTES.add('evidence_pending')
 
 type Item =
@@ -66,7 +67,7 @@ export function timeline(events: JobEvent[]): Item[] {
     } else if (e.type === 'model_failed') {
       if (lastSection && !lastSection.done && (e.purpose === '撰写正文' || e.purpose === '整理数据表')) lastSection.failed = true
       if (e.modelCall != null && models.has(e.modelCall)) {
-        Object.assign(models.get(e.modelCall)!, { running: false, failed: true, text: e.message, durationMs: e.durationMs, tokens: e.usage?.completion_tokens })
+        Object.assign(models.get(e.modelCall)!, { running: false, failed: true, text: e.message, durationMs: e.durationMs, tokens: e.usage?.total_tokens })
       } else items.push({ kind: 'note', id: e.id, text: e.message, warn: true })
     } else if (e.type === 'run_failed' || e.type === 'run_cancelled' || e.type === 'run_partial') {
       if (lastSection && !lastSection.done) lastSection.failed = true
