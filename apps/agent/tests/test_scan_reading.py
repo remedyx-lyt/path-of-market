@@ -5,7 +5,7 @@ import json
 import unittest
 
 from pypdf import PdfReader, PdfWriter
-from tests.support import RunnerFixture, FakeModel, USAGE, DOC_ID, fixtures
+from tests.support import RunnerFixture, FakeModel, USAGE, DOC_ID, fixtures, report, section
 from app.core.agent_prompts import VISION_SYSTEM
 from app.core.config import ModelServiceError
 from app.schemas.agent import Citation
@@ -91,6 +91,37 @@ class ScanReadingTests(RunnerFixture, unittest.IsolatedAsyncioTestCase):
             await runner.read({'documentId': DOC_ID})
         self.assertEqual(runner.coverage[DOC_ID]['processedPages'], [1,2,3])
         self.assertFalse(reading_complete(runner.coverage[DOC_ID]))
+
+    async def test_ready_cannot_start_writer_while_selected_scan_is_unread(self):
+        model = VisualModel()
+        _, runner = await self.prepare(vision=False, model=model)
+        await runner.read({'documentId': DOC_ID})
+        assistant = {'role': 'assistant', 'content': '{"ready":true}'}
+        runner.messages.append(assistant)
+        self.assertFalse(await runner.finish(assistant))
+        self.assertIsNone(runner.writing_state)
+        self.assertEqual(model.count('compose'), 0)
+        self.assertIn('证据尚未就绪', runner.messages[-1]['content'])
+
+    async def test_resume_defers_premature_draft_and_preserves_reading(self):
+        model = VisualModel()
+        job, runner = await self.prepare(model=model)
+        await runner.read({'documentId': DOC_ID})
+        runner.coverage[DOC_ID]['visuallyProcessedPages'] = []
+        runner.coverage[DOC_ID]['readingComplete'] = False
+        runner.visual_readings = []
+        runner.writing_state = {'sections': [{'heading': '过早草稿', 'content': '旧内容'}]}
+        runner.checkpoint()
+        restored_model = VisualModel()
+        restored_model.script = [[('read_document', {'documentId': DOC_ID})], 'final']
+        restored_model.final = report([section('证据', '原文事实', page=1), section('图像页', '实际查看图像', page=3)])
+        from app.services.research_jobs import ResearchJob
+        child = ResearchJob(job.request)
+        restored = AgentRunner(child, self.tools, runner.settings, completion=restored_model, recovery=load_recovery(self.tools, job.task_id))
+        await restored.run()
+        self.assertEqual(child.status, 'completed', child.error)
+        self.assertTrue(any(e['type'] == 'writing_deferred' for e in child.events))
+        self.assertEqual(restored_model.count('reading'), 0)
 
 
 if __name__ == '__main__':

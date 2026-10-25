@@ -510,6 +510,8 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
     async def finish(self, assistant):
         """模型未调用工具：ready 则进入写作，否则视为报告；通过核查返回 True，未通过则把问题回给模型。"""
         try:
+            if not self.context_wrapup and (gaps := self.pending_evidence()):
+                raise ValueError('证据尚未就绪，不开始写作。'+'；'.join(gaps))
             if wants_to_write(assistant.get("content")):
                 assistant = await self.compose()
             tables_done = self.report_stage == "tables"
@@ -697,6 +699,10 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
                         await self.run_tool_call(call)
                     await self.refresh_missing_history()
                     self.messages.append({"role": "user", "content": "继续完成原研究。已保存的阅读、方法与底稿继续有效，不要重新通读已完成资料；仅补必要证据（如行情），然后撰写报告。"})
+                    if (self.report_candidate or self.writing_state) and self.pending_evidence():
+                        self.job.emit('writing_deferred', '旧草稿形成时核心资料未读齐：保留旧版本，先补读，再重新组织正文')
+                        self.report_candidate, self.writing_state, self.report_stage = None, None, None
+                        self.checkpoint()
                     if self.report_candidate or self.writing_state:
                         assistant = ({"role": "assistant", "content": json.dumps(self.report_candidate, ensure_ascii=False)}
                                      if self.report_candidate else await self.compose())
@@ -711,6 +717,8 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
                         self.limits.max_context_characters - self.limits.context_reserve_characters
                     ):
                         self.start_context_wrapup()
+                    if self.context_wrapup and self.pending_evidence():
+                        raise BudgetStop('context_budget_incomplete_evidence')
                     # 收尾写作：不再让模型选工具，用已取得的证据直接撰写（核查不通过时带着诊断再写）。
                     assistant = await self.compose() if self.context_wrapup else await self.model(messages, tool_specs=self.declarations())
                     self.messages.append(assistant)
@@ -772,7 +780,7 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
                 await self.persist_outcome()
 
     def can_budget_finish(self):
-        return bool(self.coverage) and all(reading_complete(c) for c in self.coverage.values()) and (
+        return bool(self.coverage) and not self.pending_evidence() and all(reading_complete(c) for c in self.coverage.values()) and (
             not self.job.request.include_market or self.market_data is not None
         ) and (not self.job.request.include_current_period or self.current_period_checked)
 

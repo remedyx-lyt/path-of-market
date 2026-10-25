@@ -242,6 +242,31 @@ def compact_financial(data):
 
 
 class ReportMixin:
+    def pending_evidence(self):
+        """写作前的确定性门槛；模型说ready不能替代实际阅读覆盖。"""
+        pending = {}
+        for sid, document in self.required_annual.items():
+            if not reading_complete(self.coverage.get(sid)):
+                pending[sid] = {'sourceId': sid, 'tool': 'read_document', 'title': document['title']}
+        for sid, coverage in self.coverage.items():
+            if not reading_complete(coverage):
+                pending[sid] = {'sourceId': sid, 'tool': 'read_web_document' if self.sources[sid]['kind'] == 'web' else 'read_document',
+                                'unreadImagePages': sorted(set(coverage.get('emptyTextPages', []))-set(coverage.get('visuallyProcessedPages', [])))}
+        gaps = []
+        if pending:
+            gaps.append('必须先full补读以下资料；成功文字批次不会重读，无文本页由程序视觉补读：'+json.dumps(list(pending.values()), ensure_ascii=False))
+        if self.job.request.include_financials and self.annual_context()['count'] >= 5 and not self.history_checked:
+            gaps.append('先find_documents查主公司的完整五/十年年报范围。')
+        if self.job.request.include_current_period and not self.current_period_checked:
+            gaps.append('尚未查找当年最新已披露定期报告，请find_documents。')
+        if self.required_current and not reading_complete(self.coverage.get(self.required_current['documentId'])):
+            gaps.append('最新定期报告尚未读完：'+self.required_current['documentId'])
+        if self.job.request.include_market and self.market_data is None:
+            gaps.append('必须先get_market_data取得本次行情。')
+        if not self.sources:
+            gaps.append('尚无已取得的资料来源。')
+        return gaps
+
     def check_citation(self, citation):
         source = self.sources.get(citation.source_id)
         if source and source["kind"] == "web":

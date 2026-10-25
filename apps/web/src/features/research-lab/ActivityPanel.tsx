@@ -22,6 +22,7 @@ for (const type of ['mcp_search_started', 'mcp_search_finished', 'mcp_fetch_star
 for (const type of ['annual_history_lookup', 'annual_history_found']) NOTES.add(type)
 NOTES.add('annual_history_recheck_failed')
 NOTES.add('scan_reading')
+NOTES.add('writing_deferred')
 
 type Item =
   | { kind: 'phase'; id: string; text: string }
