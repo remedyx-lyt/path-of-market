@@ -117,7 +117,7 @@ def yoy(current, previous):
     return {"value": round(float((Decimal(str(current)) / Decimal(str(previous)) - 1) * 100), 4), "reason": ""}
 
 
-def build_financial_data(points, gaps=()):
+def build_financial_data(points, gaps=(), *, history_years=3):
     groups, issues = {}, list(gaps)
     for point in points:
         key = (point["period"], point["year"], point["metric"])
@@ -154,7 +154,7 @@ def build_financial_data(points, gaps=()):
         if not years:
             continue
         rows = []
-        for year in years[-3:]:
+        for year in years[-history_years:]:
             cells = {metric: p for (k, y, metric), p in values.items() if k == kind and y == year}
             amounts = {metric: p["value"] for metric, p in cells.items()}
             growth = {

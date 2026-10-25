@@ -1,6 +1,6 @@
 """AgentRunner 各部分共用的运行边界与时间函数。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 
@@ -28,6 +28,13 @@ class RunLimits:
     report_tokens: int = 14000
     read_characters: int = 26000
     max_visual_pages: int = 12
+
+    @classmethod
+    def for_history(cls, years):
+        """容量按明确资料范围扩展，写作预留、逐批缓存与断点规则不变；不是无限重试。"""
+        extra = max(0, years-2)
+        return replace(cls(), max_model_calls=144+32*extra, max_tokens=2_000_000+700_000*extra,
+                       max_seconds=1200+240*extra, max_steps=18+2*extra, max_visual_pages=max(12, years+4))
 
 
 class BudgetStop(Exception):

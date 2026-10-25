@@ -12,7 +12,11 @@ router = APIRouter(prefix="/tools", tags=["研究工具（开发验收）"])
 def list_tools():
     from app.services.agent_runner import declarations
 
-    return {"tools": get_research_tools().declarations(), "modelLoopConnected": True, "agentTools": declarations()}
+    tools = get_research_tools()
+    return {"tools": tools.declarations(), "modelLoopConnected": True, "agentTools": declarations(),
+            "mcp": {"enabled": tools.public_web.gateway.settings.enabled, "searchServer": "Exa (Streamable HTTP)",
+                    "readerServer": "MCP reference Fetch (stdio)", "connectionChecked": False,
+                    "instruction": "配置可用不代表已连通；实际搜索/正文工具事件才记录成功或失败。"}}
 
 
 @router.post("/execute")

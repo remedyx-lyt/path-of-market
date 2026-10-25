@@ -29,6 +29,7 @@ class MethodMixin:
             "includeFinancials": request.include_financials,
             "includeMarket": request.include_market,
             "includeCurrentPeriod": request.include_current_period,
+            "annualHistory": self.annual_context(),
         }
         preferences = self.memory_preferences()
         if preferences:
@@ -46,7 +47,7 @@ class MethodMixin:
         body = {
             "references": references,
             "availableTools": [s["function"]["name"] for s in self.declarations()],
-            "omenSpecs": [o.brief() for o in omens],
+            "omenSpecs": [self.omen_brief(o) for o in omens],
             "task": self.method_task(),
             "outputSchema": MethodPlan.model_json_schema(by_alias=True),
         }
@@ -72,10 +73,11 @@ class MethodMixin:
         key = stable_key(
             {
                 "references": [(r["reference"], r["sha256"]) for r in references],
-                "omens": [o.brief() for o in omens],
+                "omens": [self.omen_brief(o) for o in omens],
                 "task": self.method_task(),
                 "system": METHOD_SYSTEM,
                 "model": self.settings.model,
+                "availableTools": body["availableTools"],
             }
         )
         plan, origin = cache.load(key, parse)

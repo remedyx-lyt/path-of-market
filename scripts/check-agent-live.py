@@ -31,6 +31,10 @@ if __name__ == "__main__":
     parser.add_argument("--base-url", default="http://127.0.0.1:5173")
     parser.add_argument("--as-of", default=date.today().isoformat())
     parser.add_argument("--resume")
+    parser.add_argument("--continue-from", help="从已停止任务的检查点继续，创建关联的新任务。")
+    parser.add_argument("--target", default="中际旭创")
+    parser.add_argument("--question", default="研究最近两年的经营变化，阅读最近两份年报并补充当年已披露的半年报，分析最近约24个月股票价格走势、区间变化、回撤，以及经营与价格之间可能的联系和风险。")
+    parser.add_argument("--omens", nargs="*", default=["exalted", "abyssal_echoes"])
     parser.add_argument("--output", type=Path, default=ROOT / "storage/runs/m1-3-zjxc-web-live.json")
     parser.add_argument("--require-financials", action="store_true")
     args = parser.parse_args()
@@ -38,19 +42,23 @@ if __name__ == "__main__":
         parser.error("实际模型检查需显式 --live。")
     target = args.output if args.output.is_absolute() else ROOT / args.output
     target.parent.mkdir(parents=True, exist_ok=True)
-    if args.resume:
+    if args.continue_from:
+        code, job = request(args.base_url, "/"+args.continue_from+"/continue", "POST")
+        if code != 202:
+            raise SystemExit(f"continue failed: {code} {job.get('error', {}).get('code')}")
+        task_id = job["taskId"]
+    elif args.resume:
         task_id = args.resume
     else:
-        code, job = request(args.base_url, "", "POST", {"target": "中际旭创",
-            "question": "研究最近两年的经营变化，阅读最近两份年报并补充当年已披露的半年报，分析最近约24个月股票价格走势、区间变化、回撤，以及经营与价格之间可能的联系和风险。",
-            "asOfDate": args.as_of, "userStyle": "区分事实与假设，核对年份和口径。", "omens": ["exalted", "abyssal_echoes"], "includeMarket": True})
+        code, job = request(args.base_url, "", "POST", {"target": args.target, "question": args.question,
+            "asOfDate": args.as_of, "userStyle": "区分事实与假设，核对年份和口径。", "omens": args.omens, "includeMarket": True})
         if code != 202:
             print("create failed", code, job.get("error", {}).get("code"), flush=True)
             raise SystemExit(1)
         task_id = job["taskId"]
     print("taskId", task_id, flush=True)
     last = None
-    for _ in range(850):
+    for _ in range(3000):
         code, job = request(args.base_url, "/" + task_id)
         if code != 200:
             print("poll failed", code, flush=True)

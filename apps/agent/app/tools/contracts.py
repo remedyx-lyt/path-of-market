@@ -22,7 +22,7 @@ class CompanyArguments(Arguments):
 
 class FindArguments(CompanyArguments):
     years: list[Annotated[int, Field(ge=2000, le=2100)]] = Field(
-        min_length=1, max_length=4, description="报告所属会计年度，不是披露年份；一次最多四年。"
+        min_length=1, max_length=10, description="报告所属会计年度，不是披露年份；一次最多十年。常规五年，远古预兆十年；主公司范围由程序落实。"
     )
     as_of_date: str = Field(alias="asOfDate", description="研究截止日期 YYYY-MM-DD；只用该日及之前披露的文件。")
     report_types: list[Literal["annual", "interim", "q1", "q3"]] = Field(

@@ -4,6 +4,8 @@
 
 ## 参考依据
 
+2026-10-25新增M2-7：直接使用[MCP官方Python SDK](https://github.com/modelcontextprotocol/python-sdk) 2.3.0连接[Exa官方公开MCP](https://exa.ai/docs/get-started/exa-mcp)与[官方Fetch参考服务](https://github.com/modelcontextprotocol/servers/tree/main/src/fetch) 2026.10.24。前者用Streamable HTTP搜索，后者用固定模块stdio读取分页正文；SDK做协商、工具发现、调用与关闭。本应用额外适配只读白名单、截止日/未知日期、发现与全文阅读分离、字符游标与快照hash、原有JSONL/checkpoint、网页page=null引用校验。采用成熟协议与参考服务，未引入整套第三方Agent循环。实现/限制/测试见[MCP交接](m2-7-public-web-mcp.md)。F8范围与容量是本产品资料任务适配，见[年报年限](f8-history-window.md)。
+
 | 一手资料 | 本次核对内容 | 本项目如何使用 |
 | --- | --- | --- |
 | [Pi 工具工厂](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/tools/index.ts) | 可组合的工具集合；默认编码工具与只读工具集合分开 | 工具统一注册，根据任务选取可用集合 |

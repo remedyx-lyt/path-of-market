@@ -122,6 +122,7 @@ class CompactionMixin:
             if args.batch >= len(notes):
                 raise ToolError("CONTEXT_NOT_AVAILABLE", f"该来源共有{len(notes)}批记录，batch应从0起。")
             return {"sourceId": args.source_id, "batch": args.batch, "batchCount": len(notes),
+                    "unit": self.coverage.get(args.source_id, {}).get("unit", "page"),
                     "recalledNotes": [deepcopy(notes[args.batch])], "origin": "saved_reading_notes",
                     "instruction": "这是本分支此前真实通读形成的完整批次笔记，不是重新阅读原文；需要精确原数时继续回查原页。"}
         report = getattr(self, "base", None) or self.report_candidate or self.writing_state or {}
@@ -216,8 +217,7 @@ class CompactionMixin:
             return current
 
     def _valid_summary_citation(self, citation):
-        source = self.sources.get(citation.source_id)
-        return source is not None and (source["kind"] != "document" or citation.page in self.coverage.get(citation.source_id, {}).get("processedPages", []))
+        return self.check_citation(citation)
 
     @staticmethod
     def summary_text(summary):

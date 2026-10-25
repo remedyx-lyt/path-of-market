@@ -18,6 +18,8 @@ for (const type of ['methods_plan_invalid', 'reading_note_invalid', 'reading_bat
 for (const type of ['run_resumed', 'budget_wrapup', 'checkpoint_failed', 'writing_unit_retry', 'writing_unit_failed']) NOTES.add(type)
 for (const type of ['compaction_started', 'compaction_completed', 'compaction_failed', 'compaction_skipped']) NOTES.add(type)
 for (const type of ['memory_loaded', 'memory_disabled', 'memory_unavailable', 'memory_suggested']) NOTES.add(type)
+for (const type of ['mcp_search_started', 'mcp_search_finished', 'mcp_fetch_started', 'mcp_fetch_finished']) NOTES.add(type)
+for (const type of ['annual_history_lookup', 'annual_history_found']) NOTES.add(type)
 
 type Item =
   | { kind: 'phase'; id: string; text: string }

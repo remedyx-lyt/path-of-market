@@ -27,8 +27,8 @@ export type ModelResearchReport = Omit<MockResearchReport, 'mode' | 'isMock'> & 
     startedAt: string; finishedAt: string; stopReason: 'model_response_received'
   }
 }
-export type EvidenceSource = { sourceId: string; kind: 'document' | 'market'; title: string; url: string; publishedAt: string; pageCount?: number }
-export type ReadCoverage = { sourceId: string; pageCount: number; processedPages: number[]; processedCharacters: number; textComplete: boolean; batches: number; emptyTextPages: number[] }
+export type EvidenceSource = { sourceId: string; kind: 'document' | 'market' | 'web'; title: string; url: string; publishedAt: string; pageCount?: number; retrievedAt?: string; citationEligible?: boolean; dateStatus?: string }
+export type ReadCoverage = { sourceId: string; pageCount: number; processedPages: number[]; processedCharacters: number; textComplete: boolean; batches: number; emptyTextPages: number[]; unit?: 'segment' | 'page'; fetchComplete?: boolean; fetchedCharacters?: number }
 export type MarketSeries = { date: string; close: number; adjustedClose: number; volume: number }
 export type MarketData = {
   provider: string; currency: string; actualStart: string; actualEnd: string; retrievedAt: string

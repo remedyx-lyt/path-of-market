@@ -55,11 +55,11 @@ class TokenEfficiency(RunnerFixture, unittest.IsolatedAsyncioTestCase):
 
     async def test_reading_notes_shared_across_questions(self):
         first_model = FakeModel()
-        job, _ = self.runner(first_model, question="研究经营变化。")
+        job, _ = self.runner(first_model, question="研究最近两年的经营变化。")
         await _.run()
         self.assertGreater(first_model.count("reading"), 0)
         second_model = FakeModel()
-        second, runner = self.runner(second_model, question="完全不同的问题：研究风险。")
+        second, runner = self.runner(second_model, question="完全不同的问题：研究最近两年的风险。")
         await runner.run()
         self.assertEqual(second.status, "completed", second.error)
         self.assertEqual(second_model.count("reading"), 0)

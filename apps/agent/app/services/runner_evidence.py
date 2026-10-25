@@ -10,6 +10,7 @@ import json
 import re
 
 from app.core.agent_prompts import EXTRACT_SYSTEM, VISION_SYSTEM
+from app.core.research_history import history_count
 from app.schemas.financial import ExtractArguments, ExtractResult, InspectArguments, VisualResult, parse_extraction
 from app.services.financial_data import build_financial_data, locate_summary_pages, verified_points
 from app.services.model_json import DerivedCache, ask_json, stable_key
@@ -50,7 +51,7 @@ def consolidated_text(pages, number):
 
 class EvidenceMixin:
     def financial_data(self):
-        result = build_financial_data(self.financial_points, self.financial_gaps)
+        result = build_financial_data(self.financial_points, self.financial_gaps, history_years=max(3, history_count(self.job.request)))
         # 旧 JSONL 只保存了展示的近3年原值，最早一年的同比基数可能未在展示行里。
         # 保留旧报告已计算的同比，绝不由同比反推基数；原值或来源有变则重新计算。
         saved = getattr(self, "restored_financial", None) or {}
@@ -65,7 +66,7 @@ class EvidenceMixin:
         return result
 
     def business_data(self):
-        return build_business_data(self.segment_points, self.financial_data(), self.business_gaps)
+        return build_business_data(self.segment_points, self.financial_data(), self.business_gaps, history_years=max(3, history_count(self.job.request)))
 
     def document_pages(self, identifier):
         """已下载资料的逐页文字（只读本地缓存，每份资料加载一次）；取不到时为空，相应核对视为未找到。"""
@@ -77,6 +78,15 @@ class EvidenceMixin:
         return self.document_cache[identifier]
 
     def page_text(self, identifier, page):
+        if self.sources.get(identifier, {}).get("kind") == "web":
+            progress = self.coverage.get(identifier, {})
+            if page is None and progress.get("textComplete"):
+                snapshot = self.tools.public_web.load(identifier)
+                if snapshot and snapshot["sha256"] == progress.get("snapshotSha256"):
+                    return snapshot["text"]
+            return ""
+        if page is None:
+            return ""
         pages = self.document_pages(identifier)
         return pages[page - 1]["text"] if 0 < page <= len(pages) else ""
 
@@ -85,7 +95,7 @@ class EvidenceMixin:
         return {
             sid: pages
             for sid, c in self.coverage.items()
-            if c["textComplete"] and (pages := locate_operating_pages(self.document_pages(sid)))
+            if c["textComplete"] and self.sources.get(sid, {}).get("kind") == "document" and (pages := locate_operating_pages(self.document_pages(sid)))
         }
 
     async def extract(self, arguments, *, origin="model_tool"):

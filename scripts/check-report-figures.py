@@ -126,25 +126,20 @@ class Tools:
 
 class RunnerChecks(unittest.IsolatedAsyncioTestCase):
     async def test_18_ready_then_separate_report_and_review(self):
-        limits=[]
+        sys.path.insert(0, str(ROOT/'apps/agent/tests'))
+        from support import FakeModel
         citation={'sourceId':DOC['documentId'],'page':1}
         content={'title':'完成研究','summary':'证据支持的分析','sections':[{'heading':'业务','content':'事实','citations':[citation]},{'heading':'风险','content':'观察','citations':[citation]}]}
-        async def complete(settings,messages,**kwargs):
-            limits.append(kwargs['max_tokens'])
-            if kwargs.get('tools') and kwargs.get('tool_choice')!='none':result={'ready':True}
-            elif 'references' in messages[1]['content'][:20]:
-                path=json.loads(messages[1]['content'])['references'][0]['reference']
-                check={'topic':'business','question':'q','evidenceNeeded':'e','figureIdea':'无','methodReference':path}
-                result={'focus':'f','checks':[check]*3,'unavailable':[]}
-            elif '核对财经研究报告' in messages[0]['content']:result=json.loads(messages[1]['content'])['candidate']
-            else:result=content
-            return {'role':'assistant','content':json.dumps(result)},{'total_tokens':10}
+        complete=FakeModel(script=['final'], final=content, ready=True)
         with TemporaryDirectory() as temp:
             req=REQ.model_copy(update={'include_financials':False})
             job=ResearchJob(req);runner=AgentRunner(job,Tools(Path(temp)),ModelSettings('test'),completion=complete)
             runner.source(DOC);runner.coverage[DOC['documentId']].update(textComplete=True,processedPages=[1,2])
             await runner.run()
-            self.assertEqual(job.status,'completed',job.error);self.assertEqual(limits,[6500,6500,14000,14000,14000])  # 决策、决策、正文写作、数据表、复核
+            self.assertEqual(job.status,'completed',job.error)
+            self.assertEqual(complete.count('section'),2)
+            self.assertEqual(complete.count('metadata'),1)
+            self.assertEqual(complete.count('review'),1)  # 按F17现有分节协议验收，不能还给每节返回整篇旧格式
 
     async def test_19_invalid_response_usage_is_still_counted(self):
         async def complete(*args,**kwargs):
@@ -161,7 +156,8 @@ class RunnerChecks(unittest.IsolatedAsyncioTestCase):
                 runner.messages.append({'role':'tool','tool_call_id':str(i),'content':json.dumps({'data':{'sourceId':DOC['documentId'],'page':1,'text':'原文'*4000}})})
             context=runner.context()
             self.assertLess(len(json.dumps(context,ensure_ascii=False)),80000)
-            self.assertEqual(len(json.loads(context[-2]['content'])['data']['text']),8000)
+            recent_tool = next(m for m in reversed(context) if m['role'] == 'tool')
+            self.assertEqual(len(json.loads(recent_tool['content'])['data']['text']),8000)
             self.assertEqual(len(json.loads(runner.messages[-1]['content'])['data']['text']),8000)
 
     async def test_10_methods_actually_sent_to_model_and_planned(self):

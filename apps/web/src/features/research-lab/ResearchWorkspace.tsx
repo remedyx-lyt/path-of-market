@@ -277,7 +277,7 @@ export function ResearchWorkspace() {
           {job && <div className="research-progress" aria-live="polite">
             <strong>{job.progress}</strong>
             <p>模型调用 {job.modelCalls} 次{typeof job.usage.total_tokens === 'number' ? ` · 累计 ${job.usage.total_tokens.toLocaleString()} token` : ''}</p>
-            {job.coverage.map((entry) => <p key={entry.sourceId}>{entry.processedPages.length}/{entry.pageCount} 页文本已处理{entry.textComplete ? ' · 文本阅读完成' : ''}</p>)}
+            {job.coverage.map((entry) => <p key={entry.sourceId}>{entry.unit === 'segment' ? `${entry.processedCharacters}/${entry.fetchedCharacters ?? '?'} 字网页正文已处理` : `${entry.processedPages.length}/${entry.pageCount} 页文本已处理`}{entry.textComplete ? ' · 文本阅读完成' : ''}</p>)}
             <details><summary>查看最近动作</summary><ol>{job.events.slice(-8).map((entry) => <li key={entry.id}>{entry.message}</li>)}</ol></details>
           </div>}
           {requestError && <div className="request-error" role="alert"><strong>报告未生成</strong><p>{requestError.message}</p></div>}

@@ -12,6 +12,13 @@ from app.core.omens import selected_omens
 
 
 class OmenMixin:
+    def omen_brief(self, omen):
+        brief = omen.brief()
+        if self.mcp_enabled:
+            brief["toolHints"] = list(brief["toolHints"]) + ["需要外部资料时用search_public_information发现，再read_web_document全文读网页；PDF走官方披露工具。"]
+            brief["capabilityGaps"] = ["已接公开网页搜索/正文工具，但付费数据库、完整卖方一致预期、全市场结构化行业数据和受限内容未接；未实际找到并读完的外部证据仍须写缺口。"]
+        return brief
+
     def omens(self):
         return selected_omens(self.job.request)
 
@@ -21,7 +28,7 @@ class OmenMixin:
             return None
         return {
             "type": "omen_research_specs",
-            "omens": [o.brief() for o in omens],
+            "omens": [self.omen_brief(o) for o in omens],
             "instruction": (
                 "所选预兆改变研究视角与资料选择：按 dataPreferences/toolHints 决定补查哪些资料，回答 keyQuestions；"
                 "多个预兆并列呈现，冲突时不强行调和；capabilityGaps 是当前工具拿不到的资料，必须写成缺口而不是猜测。"
@@ -77,7 +84,7 @@ class OmenMixin:
                 "name": omen.name,
                 "skillsRead": [m for m in omen.methods if m in read],
                 "planChecks": sum(c.get("omen") == omen.id for c in plan_checks),
-                "capabilityGaps": list(omen.capability_gaps),
+                "capabilityGaps": self.omen_brief(omen)["capabilityGaps"],
                 "coverageScope": "现有工具与已读资料范围内",
                 "verification": "程序核对章节标记、来源与关键要素；内容是否充分由模型自评并经复核，不等于独立审计。",
             }

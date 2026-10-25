@@ -101,8 +101,8 @@ class DiscussionRunner(AgentRunner):
 
     def reply_context(self, *, final=False):
         instruction = (
-            "你在报告旁回答追问。先用已有资料；需要时调用已提供的研究工具，不能声称搜索网页或用了未提供的工具。"
-            "选定新资料仍需full通读；引用仅来自实际已读来源和物理页。证据不足明确说明，事实推断分开。"
+            "你在报告旁回答追问。先用已有资料；需要时调用已提供的研究工具，包括MCP公开搜索/通读网页，不能声称用了未提供的工具。"
+            "选定新资料仍需full通读；PDF引用实际物理页，通读网页引用page=null且发布日期不晚于截止日。证据不足明确说明，事实推断分开。"
             "最终按以下JSON schema回答；不要输出整份原报告。ask只回答，sectionEdits为空、summary为null；"
             "revise按请求局部修改，sectionEdits.index是原报告0起章节序号，等于章节数时追加一节；"
             "只提交修改章节的标题/正文/引用，程序保留该章原表格与图；不能声称已修改数据表或图。"
@@ -144,8 +144,7 @@ class DiscussionRunner(AgentRunner):
                 await asyncio.sleep(0.2 * (retry + 1))
 
     def safe_citation(self, citation):
-        source = self.sources.get(citation.source_id)
-        return bool(source) and (source["kind"] != "document" or citation.page in self.coverage.get(citation.source_id, {}).get("processedPages", []))
+        return self.check_citation(citation)
 
     def revised_report(self, answer):
         result = deepcopy(self.base)

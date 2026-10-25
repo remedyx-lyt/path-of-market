@@ -71,7 +71,7 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
         <div><dt>执行情况</dt><dd>{report.run.modelCalls} 次模型调用 · {report.run.steps} 轮决策 · {report.run.stopReason}</dd></div>
         <div><dt>模型用量</dt><dd>{usageText(report.run.usage)}</dd></div>
         <div><dt>资料阅读</dt><dd>{report.coverage.map((entry) => <p key={entry.sourceId}>
-          {report.sources.find((s) => s.sourceId === entry.sourceId)?.title}：{entry.processedPages.length}/{entry.pageCount} 页文本
+          {report.sources.find((s) => s.sourceId === entry.sourceId)?.title}：{entry.unit === 'segment' ? `${entry.processedCharacters}/${entry.fetchedCharacters ?? '?'} 字网页正文` : `${entry.processedPages.length}/${entry.pageCount} 页文本`}
           {entry.textComplete ? '，文本阅读完成' : '，尚有未完成范围'}
         </p>)}</dd></div>
         <div><dt>工具动作</dt><dd><ol>{report.toolCalls.map((call) => <li key={call.toolCallId}>{labels[call.name] || call.name} · {call.status}{call.errorCode ? ` (${call.errorCode})` : ''}</li>)}</ol></dd></div>
@@ -109,7 +109,7 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
     {report.researchSkill && <p className="report-skill">研究规范：{report.researchSkill.name} · {report.researchSkill.version} · 参考 {report.researchSkill.upstream}</p>}
     <section className="report-evidence" aria-label="研究来源">
       <h3>本次资料来源</h3>
-      <ol>{report.sources.map((source) => <li key={source.sourceId}><a href={source.url} target="_blank" rel="noreferrer">{source.title} ↗</a><p>{source.kind === 'document' ? '披露日期' : '数据截至'}：{source.publishedAt}</p></li>)}</ol>
+      <ol>{report.sources.map((source) => <li key={source.sourceId}><a href={source.url} target="_blank" rel="noreferrer">{source.title} ↗</a><p>{source.kind === 'document' ? '披露日期' : source.kind === 'web' ? '网页发布日期' : '数据截至'}：{source.publishedAt || '未知（不作为截止日事实引用）'}{source.kind === 'web' && source.retrievedAt ? ` · 获取于 ${source.retrievedAt.slice(0, 10)}` : ''}</p></li>)}</ol>
     </section>
     <div className="report-limitations">{report.limitations.map((text) => <p key={text}>{text}</p>)}</div>
   </>

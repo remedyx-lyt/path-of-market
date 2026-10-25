@@ -24,6 +24,7 @@ from app.tools.documents import DocumentStore
 from app.tools.market import MarketArguments, MarketProvider
 from app.schemas.financial import InspectArguments
 from app.tools.visuals import render_pages
+from app.tools.public_web import PublicWeb
 
 
 @dataclass(frozen=True)
@@ -65,10 +66,11 @@ TOOLS = (
 
 
 class ResearchTools:
-    def __init__(self, root: Path | None = None, provider=None, market_provider=None):
+    def __init__(self, root: Path | None = None, provider=None, market_provider=None, public_web=None):
         self.provider = provider or CninfoProvider()
         self.store = DocumentStore(root if root is not None else PROJECT_ROOT / "storage/documents")
         self.market_provider = market_provider or MarketProvider()
+        self.public_web = public_web or PublicWeb(self.store.root)
         self.definitions = {tool.name: tool for tool in TOOLS}
 
     def declarations(self):

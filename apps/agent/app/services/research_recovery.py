@@ -15,11 +15,12 @@ from app.services.session_recorder import DEFAULT_URL
 from app.tools.documents import write_json
 
 STATE_FIELDS = (
-    "notes", "sources", "coverage", "discovered", "current_period_checked", "required_current", "current_period_gap",
+    "notes", "sources", "coverage", "discovered", "web_discovered", "current_period_checked", "required_current", "current_period_gap",
     "market_data", "visual_readings", "extraction_readings", "financial_points", "financial_gaps", "segment_points",
     "business_gaps", "method_usage", "action_counts", "report_candidate", "table_gaps", "wrapup_gaps", "restored_financial",
     "writing_state", "writer_tools_rejected", "report_stage",
     "compaction_state", "compaction_count",
+    "history_checked", "required_annual", "history_gap",
 )
 SET_FIELDS = ("financial_checked", "detail_checked")
 
@@ -81,7 +82,7 @@ def legacy_recovery(entries, task_id, *, allow_completed=False):
     sources = {s["sourceId"]: s for s in report.get("sources", [])}
     state = {
         "sources": sources, "coverage": {c["sourceId"]: c for c in report.get("coverage", [])},
-        "notes": {}, "discovered": {}, "current_period_checked": False, "required_current": None,
+        "notes": {}, "discovered": {}, "web_discovered": {}, "current_period_checked": False, "required_current": None,
         "market_data": report.get("marketData"), "method_usage": report.get("methodUsage"),
         "visual_readings": report.get("visualReadings", []), "extraction_readings": report.get("extractionReadings", []),
         "financial_points": [], "segment_points": [], "financial_checked": [], "detail_checked": [],
@@ -108,6 +109,9 @@ def legacy_recovery(entries, task_id, *, allow_completed=False):
             continue
         for doc in data.get("documents", []):
             state["discovered"][doc["documentId"]] = doc
+        for item in data.get("results", []):
+            if isinstance(item, dict) and str(item.get("sourceId", "")).startswith("web-"):
+                state["web_discovered"][item["sourceId"]] = item
         query = data.get("currentPeriodQuery")
         if isinstance(query, dict):
             state["current_period_checked"] = bool(query.get("queryComplete"))

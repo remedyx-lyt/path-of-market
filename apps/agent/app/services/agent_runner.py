@@ -31,6 +31,10 @@ from app.services.runner_evidence import EvidenceMixin
 from app.services.runner_methods import MethodMixin
 from app.services.runner_omens import OmenMixin
 from app.services.runner_reading import ReadingMixin
+from app.services.runner_web import WebMixin
+from app.services.runner_history import HistoryMixin
+from app.core.research_history import history_count
+from app.tools.public_web import PublicSearchArguments, WebReadArguments
 from app.services.runner_report import ReportMixin, compact_financial, strip_quotes
 from app.services.runner_writing import WritingMixin
 from app.services.runtime import BudgetStop, RunLimits, now
@@ -45,6 +49,8 @@ __all__ = ["AgentRunner", "BudgetStop", "RunLimits", "declarations", "now"]
 logger = logging.getLogger("path_of_market.agent")
 
 TOOL_SPECS = (
+    ("search_public_information", "通过MCP查公开信息，优先一手来源，自动按任务截止日过滤；摘要只发现，选中的网页仍须完整阅读。", PublicSearchArguments),
+    ("read_web_document", "通过MCP获取已搜索到的网页完整正文并分批通读，保存游标/覆盖；full可接续，search只回查已通读原文。网页引用page=null；未知发布日期不能支持截止日事实。", WebReadArguments),
     ("recall_user_memory", "按公司名/关键词回查跨会话研究经历与已确认偏好；历史用户问题不是公司事实证据。", RecallUserMemoryArguments),
     ("remember_user_memory", "将本次用户表达的长期研究偏好存为待确认建议，必须附逐字用户原话；不能根据年报/模型回复推断画像或覆盖用户确认偏好。", RememberUserMemoryArguments),
     ("recall_research_context", "回查本分支已保存的完整阅读笔记或报告正文。上下文整理后找回细节，不重新付费通读PDF。reading_notes用sourceId/batch，report_section用sectionIndex。", RecallArguments),
@@ -74,6 +80,8 @@ TOOL_SPECS = (
 
 
 TOOL_LABELS = {
+    "search_public_information": "MCP搜索公开资料",
+    "read_web_document": "MCP通读网页",
     "recall_user_memory": "回查用户研究记忆",
     "remember_user_memory": "记录偏好建议",
     "recall_research_context": "回查研究记录",
@@ -171,10 +179,10 @@ class ToolView:
         return cls(content, projected, excerpt, bool(pages))
 
 
-class AgentRunner(UserMemoryMixin, CompactionMixin, ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMixin, ReportMixin):
+class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMixin, ReportMixin):
     def __init__(self, job, tools, settings, *, limits=None, completion=None, recovery=None):
         self.job, self.tools, self.settings = job, tools, settings
-        self.limits = limits or RunLimits()
+        self.limits = limits or RunLimits.for_history(history_count(job.request))
         self.completion = completion or complete_turn
         self.began = time.monotonic()
         self.recovery = recovery
@@ -202,6 +210,8 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, ReadingMixin, EvidenceMixin,
         self.notes, self.sources, self.coverage = {}, {}, {}
         # 资料发现与当期报告
         self.discovered = {}
+        self.web_discovered = {}
+        self.history_checked, self.required_annual, self.history_gap = False, {}, None
         self.current_period_checked = False
         self.required_current = None
         self.current_period_gap = None
@@ -235,7 +245,13 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, ReadingMixin, EvidenceMixin,
         return self.completion is complete_turn
 
     def declarations(self):
-        return declarations()
+        enabled = self.mcp_enabled
+        return [d for d in declarations() if enabled or d["function"]["name"] not in {"search_public_information", "read_web_document"}]
+
+    @property
+    def mcp_enabled(self):
+        service = getattr(self.tools, "public_web", None)
+        return bool(service and service.gateway.settings.enabled)
 
     # ---- 预算与模型调用 -------------------------------------------------
 
@@ -333,6 +349,8 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, ReadingMixin, EvidenceMixin,
 
     async def dispatch(self, name, arguments):
         handlers = {
+            "search_public_information": self.search_public_information,
+            "read_web_document": self.read_web_document,
             "recall_user_memory": self.recall_user_memory,
             "remember_user_memory": self.remember_user_memory,
             "recall_research_context": self.recall_research_context,
@@ -359,7 +377,9 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, ReadingMixin, EvidenceMixin,
         args = FindArguments.model_validate(arguments)
         if args.as_of_date != self.job.request.as_of_date.isoformat():
             raise ToolError("CUTOFF_MISMATCH", "查询应使用任务的研究截止日期。")
+        args = await self.history_documents(args)
         result = await self.raw_tool("find_documents", args.model_dump(by_alias=True))
+        self.register_history(args, result)
         if self.job.request.include_current_period and not self.current_period_checked:
             await self.add_current_period(args, result)
         self.discovered.update({d["documentId"]: d for d in result["documents"]})
@@ -430,10 +450,12 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, ReadingMixin, EvidenceMixin,
             messages += [{"role": "user", "content": json.dumps(memory, ensure_ascii=False)}]
         # 机器保存的来源/覆盖/计划不交给摘要模型改写；每次请求都带准确索引。
         source_index = [{"sourceId": sid, "title": s["title"], "kind": s["kind"], "pageCount": s.get("pageCount"),
-                         "textComplete": self.coverage.get(sid, {}).get("textComplete"), "noteBatches": len(self.notes.get(sid, []))}
+                         "textComplete": self.coverage.get(sid, {}).get("textComplete"), "noteBatches": len(self.notes.get(sid, [])),
+                         "publishedAt": s.get("publishedAt"), "citationEligible": s.get("citationEligible", True),
+                         "coverageUnit": self.coverage.get(sid, {}).get("unit", "page")}
                         for sid, s in self.sources.items()]
         messages += [{"role": "user", "content": json.dumps({"type": "research_context_index", "sources": source_index,
-                     "methodPlan": (self.method_usage or {}).get("plan"),
+                     "methodPlan": (self.method_usage or {}).get("plan"), "annualHistory": self.annual_context(),
                      "instruction": "完整阅读记录和精确底稿仍在程序中。需要历史细节用recall_research_context；摘要不是新证据。"}, ensure_ascii=False)}]
         if self.financial_points or self.financial_gaps or self.segment_points:
             state = {
@@ -580,7 +602,7 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, ReadingMixin, EvidenceMixin,
         self.checkpoint()
 
     def document_title(self, identifier):
-        document = self.sources.get(identifier) or self.discovered.get(identifier) or {}
+        document = self.sources.get(identifier) or self.discovered.get(identifier) or self.web_discovered.get(identifier) or {}
         return document.get("title") or identifier
 
     def describe_call(self, name, raw_arguments):
@@ -593,6 +615,10 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, ReadingMixin, EvidenceMixin,
             return ""
         pages = lambda value: "、".join(map(str, value)) if isinstance(value, list) else str(value)
         doc = self.document_title(a.get("documentId", ""))
+        if name == "search_public_information":
+            return a.get("query", "")
+        if name == "read_web_document":
+            return ("通读 " if a.get("mode", "full") == "full" else "回查 ") + self.document_title(a.get("sourceId", ""))
         if name == "recall_user_memory":
             return a.get("query") or "最近研究经历与确认偏好"
         if name == "remember_user_memory":
@@ -620,6 +646,11 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, ReadingMixin, EvidenceMixin,
         if result["status"] != "completed":
             return result["error"]["message"]
         data = result["data"]
+        if name == "search_public_information":
+            return f"发现{len(data.get('results', []))}份候选资料（未读）"
+        if name == "read_web_document":
+            progress = data.get("coverage")
+            return f"网页已读{progress['processedCharacters']}字" if progress else f"回查{len(data.get('matches', []))}处原文"
         if name == "recall_user_memory":
             return f"返回{len(data.get('episodes', []))}条研究经历"
         if name == "remember_user_memory":

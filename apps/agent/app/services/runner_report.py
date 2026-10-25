@@ -243,6 +243,11 @@ def compact_financial(data):
 class ReportMixin:
     def check_citation(self, citation):
         source = self.sources.get(citation.source_id)
+        if source and source["kind"] == "web":
+            return (citation.page is None and bool(source.get("publishedAt"))
+                    and source["publishedAt"] <= self.job.request.as_of_date.isoformat()
+                    and source.get("citationEligible") is True
+                    and self.coverage.get(citation.source_id, {}).get("textComplete") is True)
         return source is not None and (
             source["kind"] != "document"
             or citation.page is not None
@@ -295,7 +300,7 @@ class ReportMixin:
         self.require_evidence(
             self.coverage and not unread,
             "选定报告尚未完整处理可提取文字，请继续 full 阅读或明确停止缺口",
-            "以下资料未读完：" + "、".join(f"{self.sources[c['sourceId']]['title']}（已处理 {len(c['processedPages'])}/{c['pageCount']} 页）" for c in unread),
+            "以下资料未读完：" + "、".join(f"{self.sources[c['sourceId']]['title']}（已处理 {len(c['processedPages'])}/{c['pageCount']} {'段' if c.get('unit') == 'segment' else '页'}）" for c in unread),
         )
         self.require_evidence(
             not (self.job.request.include_market and self.market_data is None), "本任务要求行情分析，尚未取得行情", "本任务要求的行情分析未取得行情数据。"
@@ -306,6 +311,10 @@ class ReportMixin:
             "未查找截止年度最新已披露的定期报告。",
         )
         current = self.required_current
+        unread_annual = [d for sid, d in self.required_annual.items() if not self.coverage.get(sid, {}).get("textComplete")]
+        self.require_evidence(not unread_annual,
+                              "本次年报范围尚未完成，请full通读：" + "、".join(d["documentId"] for d in unread_annual),
+                              "本次年报范围未读完：" + "、".join(d["title"] for d in unread_annual))
         self.require_evidence(
             not current or self.coverage.get(current["documentId"], {}).get("textComplete"),
             f"当年最新已披露报告尚未通读，请以 mode=full 阅读 {current['documentId']}：{current['title']}" if current else "",
@@ -360,6 +369,7 @@ class ReportMixin:
             "coverage": [
                 {
                     "sourceId": c["sourceId"],
+                    "unit": c.get("unit", "page"),
                     "pageCount": c["pageCount"],
                     "processedPageCount": len(c["processedPages"]),
                     "emptyTextPages": c["emptyTextPages"],
@@ -569,10 +579,16 @@ class ReportMixin:
             "已提交的会话记录可在服务重启后查看；运行中的任务尚不能在重启后自动接续。" if self.job.recorder
             else "本次未启用会话存储，记录仅保留在运行进程内。",
         ]
+        if any(s["kind"] == "web" for s in self.sources.values()):
+            limitations.append("公开网页仅通读本次MCP提取的正文快照，不包含自动跟读外链、图片识别、动态加载或付费内容；检索日期不等于发布日期。")
+            limitations += [f"网页发布日期未知，未作为截止日事实引用：{s['title']}" for s in self.sources.values()
+                            if s["kind"] == "web" and not s.get("publishedAt")]
         if self.market_data:
             limitations += self.market_data["limitations"]
         if self.current_period_gap:
             limitations.append(self.current_period_gap)
+        if self.history_gap:
+            limitations.append(self.history_gap)
         limitations += ["未解决的来源冲突：" + c for c in self.conflicts()]
         if self.context_wrapup:
             limitations.append("上下文接近上限，提前结束取证；报告只基于此前已取得的证据，未继续补查的问题见正文说明。")
@@ -593,6 +609,7 @@ class ReportMixin:
             "sources": list(self.sources.values()),
             "toolCalls": self.job.tool_calls,
             "coverage": list(self.coverage.values()),
+            "annualHistory": self.annual_context(),
             "marketData": self.market_data,
             "financialData": financial_data if self.job.request.include_financials or self.financial_points else None,
             "visualReadings": self.visual_readings,

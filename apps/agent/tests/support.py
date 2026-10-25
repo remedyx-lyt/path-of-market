@@ -30,7 +30,7 @@ SETTINGS = ModelSettings("isolated-test-key-only", "http://127.0.0.1:1", "isolat
 DOC_ID = "cninfo-1234567890"
 BASE_REQUEST = {
     "target": "同花顺",
-    "question": "研究经营变化与行情。",
+    "question": "研究最近两年的经营变化与行情。",
     "asOfDate": "2026-10-23",
     "includeMarket": True,
     "includeCurrentPeriod": False,

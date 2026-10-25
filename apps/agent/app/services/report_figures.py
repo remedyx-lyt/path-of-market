@@ -95,9 +95,9 @@ def check_table(table, page_text):
     """
     checked, unmatched = 0, []
     for r, row in enumerate(table["rows"]):
-        if row.get("page") is None:  # 行情等无页码来源：不做原页核对，也不计入核对数
+        if row.get("page") is None and not page_text(row["sourceId"], None):  # 网页可核对完整快照；行情无原文不计入核对
             continue
-        cited = [(row["sourceId"], row["page"])] + [(c["sourceId"], c["page"]) for c in row.get("alsoFrom") or [] if c.get("page")]
+        cited = [(row["sourceId"], row["page"])] + [(c["sourceId"], c.get("page")) for c in row.get("alsoFrom") or []]
         page_values = {Decimal(t) for sid, page in cited for t in number_tokens(page_text(sid, page))}
         for c, cell in enumerate(row["cells"]):
             numbers = NUMBER.findall(cell)
@@ -155,7 +155,7 @@ def verified_segments(result, document, pages):
     return accepted, gaps
 
 
-def build_business_data(points, financial_data, gaps=()):
+def build_business_data(points, financial_data, gaps=(), *, history_years=3):
     groups, issues = defaultdict(list), list(gaps)
     for p in points:
         groups[(p["dimension"], p["period"], p["year"], p["label"])].append(p)
@@ -169,7 +169,7 @@ def build_business_data(points, financial_data, gaps=()):
     datasets = []
     for dimension in DIMENSIONS:
         for period in PERIODS:
-            years = sorted({y for dim, k, y, _ in values if dim == dimension and k == period})[-3:]
+            years = sorted({y for dim, k, y, _ in values if dim == dimension and k == period})[-history_years:]
             rows = []
             for year in years:
                 cells = [p for (dim, k, y, _), p in values.items() if dim == dimension and k == period and y == year]

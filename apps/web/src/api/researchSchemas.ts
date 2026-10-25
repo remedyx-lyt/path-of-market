@@ -35,13 +35,14 @@ export const modelReportSchema = z.object({
 
 // pageCount 不单独校验类型，但页码范围检查要用；zod 默认丢弃未声明字段，所以这里显式保留。
 const source = z.object({
-  sourceId: str, title: str, publishedAt: str, url: str.startsWith('https://'), kind: z.enum(['document', 'market']), pageCount: z.unknown().optional(),
+  sourceId: str, title: str, publishedAt: str, url: str.startsWith('https://'), kind: z.enum(['document', 'market', 'web']), pageCount: z.unknown().optional(), citationEligible: z.boolean().optional(),
 })
 type Source = z.infer<typeof source>
 
 export const coverageSchema = z.object({
   sourceId: str, pageCount: int, processedPages: z.array(int), textComplete: z.boolean(),
   processedCharacters: finite, batches: int, emptyTextPages: z.array(z.unknown()),
+  unit: z.enum(['page', 'segment']).optional(), fetchComplete: z.boolean().optional(), fetchedCharacters: finite.optional(),
 })
 
 const citation = z.object({ sourceId: str, page: int.nullish() })
@@ -164,13 +165,21 @@ export const agentReportSchema = z.object({
 }).superRefine((report, ctx) => {
   const sources = report.sources as Source[]
   const fail = (message: string) => ctx.addIssue({ code: 'custom', message })
+  const webCitation = (sourceId: string, page: unknown) => {
+    const s = sources.find((entry) => entry.sourceId === sourceId)
+    return s?.kind === 'web' && page == null && s.citationEligible === true && Boolean(s.publishedAt)
+      && s.publishedAt <= report.asOfDate && report.coverage.some((c) => c.sourceId === sourceId && c.textComplete && c.fetchComplete)
+  }
+  for (const c of report.sections.flatMap((s) => s.citations)) {
+    if (sources.some((s) => s.sourceId === c.sourceId && s.kind === 'web') && !webCitation(c.sourceId, c.page)) fail('网页引用必须已通读、已知发布日期且不晚于截止日，不能带PDF页码')
+  }
   for (const row of report.financialData?.datasets.flatMap((d) => d.rows) ?? []) {
     if (!Object.values(row.evidence).every((e) => documentPage(sources, e.sourceId, e.page))) fail('财务证据页不在来源范围内')
   }
   for (const row of report.sections.flatMap((s) => s.tables ?? []).flatMap((t) => t.rows.flatMap((r) => [r, ...(r.alsoFrom ?? []).map((c) => ({ ...c, page: c.page ?? null }))]))) {
     // 行情来源没有页码（与后端 check_citation 一致，不检查页码）；文件来源的页码须在资料范围内。
     const source = sources.find((s) => s.sourceId === row.sourceId)
-    const ok = source != null && (source.kind === 'market' || row.page == null || documentPage(sources, row.sourceId, row.page))
+    const ok = source != null && (source.kind === 'web' ? webCitation(row.sourceId, row.page) : source.kind === 'market' || row.page == null || documentPage(sources, row.sourceId, row.page))
     if (!ok) fail('表格来源页不在资料范围内')
   }
   for (const row of report.businessData?.datasets.flatMap((d) => d.rows) ?? []) {
@@ -192,7 +201,7 @@ export const agentReportSchema = z.object({
       }
       const cited = figure.diagram?.nodes.flatMap((node) => node.citations) ?? []
       if (!cited.every((c) => sources.some((s) => s.sourceId === c.sourceId
-        && (s.kind === 'market' || Number.isInteger(c.page) && Number(c.page) > 0 && Number(c.page) <= Number(s.pageCount))))) fail('示意图引用的资料页不存在')
+        && (s.kind === 'web' ? webCitation(c.sourceId, c.page) : s.kind === 'market' || Number.isInteger(c.page) && Number(c.page) > 0 && Number(c.page) <= Number(s.pageCount))))) fail('示意图引用的资料页不存在')
     })
   }
 })
