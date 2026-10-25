@@ -30,9 +30,37 @@ def fake_rows(kind, symbol):
     return rows[kind]
 
 
+def fake_segments(symbol):
+    """模拟 stock_zygc_em：2025 年报分产品/地区；2026 中报的利润表不在截止日前披露范围内（假数据里没有），应被排除。"""
+    return [
+        {"报告日期": "2025-12-31", "分类类型": "按产品分类", "主营构成": "金融信息服务", "主营收入": 3.0e9, "毛利率": 0.9},
+        {"报告日期": "2025-12-31", "分类类型": "按产品分类", "主营构成": "广告", "主营收入": 1.0e9, "毛利率": 0.5},
+        {"报告日期": "2025-12-31", "分类类型": "按地区分类", "主营构成": "境内", "主营收入": 4.0e9, "毛利率": None},
+        {"报告日期": "2025-12-31", "分类类型": "按产品分类", "主营构成": "其中:广告分成", "主营收入": 0.5e9, "毛利率": 0.5},
+        {"报告日期": "2026-06-30", "分类类型": "按产品分类", "主营构成": "金融信息服务", "主营收入": 2.0e9, "毛利率": 0.9},
+        {"报告日期": "2025-12-31", "分类类型": "未知分类", "主营构成": "x", "主营收入": 1.0, "毛利率": None},
+    ]
+
+
 class Provider(unittest.TestCase):
+    def test_segments_follow_statement_notice_dates(self):
+        data = FinancialStatementProvider(fetch=fake_rows, fetch_segments=fake_segments).statements(COMPANY, 2023, 2026, "2026-10-23")
+        segments = {(p["dimension"], p["label"], p["year"]): p for p in data["segmentPoints"]}
+        self.assertEqual(set(segments), {("product", "金融信息服务", 2025), ("product", "广告", 2025), ("geography", "境内", 2025)})
+        self.assertEqual(segments["product", "广告", 2025]["grossMargin"], 50.0)
+        self.assertEqual(segments["product", "广告", 2025]["publishedAt"], "2026-03-28")
+        self.assertTrue(data["segmentsAvailable"])
+
+    def test_segment_failure_keeps_statements(self):
+        def broken(symbol):
+            raise RuntimeError("network")
+
+        data = FinancialStatementProvider(fetch=fake_rows, fetch_segments=broken).statements(COMPANY, 2023, 2026, "2026-10-23")
+        self.assertFalse(data["segmentsAvailable"])
+        self.assertTrue(data["points"])
+
     def test_maps_fields_and_filters_by_notice_date(self):
-        data = FinancialStatementProvider(fetch=fake_rows).statements(COMPANY, 2023, 2026, "2026-10-23")
+        data = FinancialStatementProvider(fetch=fake_rows, fetch_segments=fake_segments).statements(COMPANY, 2023, 2026, "2026-10-23")
         values = {(p["metric"], p["year"], p["period"]): p["value"] for p in data["points"]}
         self.assertEqual(values[("revenue", 2025, "annual")], 4.0e9)
         self.assertEqual(values[("totalLiabilities", 2025, "annual")], 4.0e9)
@@ -47,10 +75,10 @@ class Provider(unittest.TestCase):
             raise RuntimeError("network")
 
         with self.assertRaises(ToolError) as caught:
-            FinancialStatementProvider(fetch=broken).statements(COMPANY, 2024, 2025, "2026-10-23")
+            FinancialStatementProvider(fetch=broken, fetch_segments=fake_segments).statements(COMPANY, 2024, 2025, "2026-10-23")
         self.assertEqual(caught.exception.code, "FINANCIAL_DB_UNAVAILABLE")
         with self.assertRaises(ToolError):
-            FinancialStatementProvider(fetch=fake_rows).statements({**COMPANY, "exchange": "BSE"}, 2024, 2025, "2026-10-23")
+            FinancialStatementProvider(fetch=fake_rows, fetch_segments=fake_segments).statements({**COMPANY, "exchange": "BSE"}, 2024, 2025, "2026-10-23")
 
 
 class Merge(unittest.TestCase):
@@ -75,7 +103,7 @@ class FakeStatements:
 
     def statements(self, company, start, end, as_of):
         self.calls += 1
-        return FinancialStatementProvider(fetch=fake_rows).statements(company, start, end, as_of)
+        return FinancialStatementProvider(fetch=fake_rows, fetch_segments=fake_segments).statements(company, start, end, as_of)
 
 
 class Runner(RunnerFixture, unittest.IsolatedAsyncioTestCase):
@@ -92,6 +120,21 @@ class Runner(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(annual["rows"][-1]["values"]["revenue"], 4.0e9)
         self.assertIsNone(annual["rows"][-1]["evidence"]["revenue"]["page"])
         self.assertIn("4000000000.00", runner.page_text("akshare-300033", None))  # 数据表引用它时可按数值核对
+        business = runner.business_data()
+        product = next(d for d in business["datasets"] if d["id"] == "product-annual")
+        items = {i["label"]: i for i in product["rows"][-1]["items"]}
+        self.assertEqual(items["金融信息服务"]["share"], 75.0)
+        self.assertEqual(items["广告"]["grossMargin"], 50.0)
+        self.assertIsNone(items["广告"]["page"])
+        # 年报取到的同期分项（名称不同）不再混入，年报取数失败提示也不列出
+        runner.segment_points.append({"dimension": "product", "label": "其他名称", "year": 2025, "period": "annual", "value": 1.0,
+                                      "sourceId": DOC_ID, "page": 2, "publishedAt": "2026-03-28", "rawValue": "1", "unit": "元"})
+        runner.business_gaps.append("广告收入未通过原文/金额/单位/期间核对，未进入业务图。")
+        runner.business_gaps.append("年报取数说明：第73页未见分产品营业收入分项表")  # 山东黄金实测出现过25条此类说明
+        business = runner.business_data()
+        product = next(d for d in business["datasets"] if d["id"] == "product-annual")
+        self.assertNotIn("其他名称", {i["label"] for i in product["rows"][-1]["items"]})
+        self.assertFalse(any("未进入业务图" in g or g.startswith("年报取数说明") for g in business["gaps"]))
 
     async def test_database_failure_is_a_gap_not_a_stop(self):
         class Broken:

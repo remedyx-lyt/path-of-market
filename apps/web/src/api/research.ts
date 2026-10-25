@@ -50,7 +50,7 @@ export type BusinessData = {
   schemaVersion: 1; method: string; gaps: string[]
   datasets: { id: string; dimension: string; period: string; label: string; rows: {
     year: number; periodLabel: string; total: number; totalEvidence: FinancialRow['evidence'][string]
-    items: { label: string; value: number; share: number; derived: boolean; sourceId?: string; page?: number; rawValue?: string; unit?: string; quote?: string }[]
+    items: { label: string; value: number; share: number; derived: boolean; sourceId?: string; page?: number | null; grossMargin?: number | null; rawValue?: string; unit?: string; quote?: string }[]
   }[] }[]
 }
 /** 模型根据原文自行做的数据表；verification 是程序逐格核对结果（unmatched 为未在所引原页找到的 [行, 列]）。 */

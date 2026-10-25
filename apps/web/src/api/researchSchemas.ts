@@ -94,11 +94,11 @@ const financialData = z.object({
 }).refine((data) => data.charts.every((chart) => data.datasets.some((d) => d.id === chart.datasetId)), '图表引用了不存在的数据集')
 
 const nonNegative = finite.nonnegative()
-// 合并收入总额可能来自结构化财务报表（无页码）；分项收入仍来自年报原页。
+// 结构化财务报表/主营构成（AKShare）没有页码；年报原文取数带原页。
 const businessEvidence = z.object({ sourceId: str, page: int.positive().nullable() })
 const businessItem = z.object({
   label: str, value: nonNegative, share: nonNegative.max(100.01), derived: z.boolean(),
-  sourceId: z.unknown().optional(), page: z.unknown().optional(),
+  sourceId: z.unknown().optional(), page: z.unknown().optional(), grossMargin: finite.nullish(),
 }).refine((item) => item.derived || businessEvidence.safeParse(item).success, '非派生项目缺少原文依据')
 const businessRow = z.object({
   year: int, periodLabel: str, total: nonNegative.refine((total) => total !== 0, '总额不能为 0'),

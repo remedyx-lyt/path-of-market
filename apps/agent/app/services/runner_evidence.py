@@ -14,7 +14,7 @@ from app.core.research_history import history_count
 from app.schemas.financial import ExtractArguments, ExtractResult, InspectArguments, VisualResult, parse_extraction
 from app.services.financial_data import build_financial_data, locate_summary_pages, verified_points
 from app.services.model_json import DerivedCache, ask_json, stable_key
-from app.services.report_figures import build_business_data, locate_detail_pages, locate_operating_pages, verified_segments
+from app.services.report_figures import EXTRACTION_NOTE, build_business_data, locate_detail_pages, locate_operating_pages, verified_segments
 from app.services.runtime import now
 from app.services.reading_coverage import reading_complete, update_reading_complete
 from app.tools.contracts import ToolError
@@ -153,7 +153,7 @@ class EvidenceMixin:
         self.financial_points += points
         self.financial_gaps += gaps
         self.segment_points += segments
-        self.business_gaps += segment_gaps + parsed.gaps
+        self.business_gaps += segment_gaps + [EXTRACTION_NOTE + g for g in parsed.gaps]
         if missing:
             self.financial_gaps.append("正文取数缺少连续原文引文的数值已排除。")
         record = {
@@ -306,8 +306,16 @@ class EvidenceMixin:
             {**p, "sourceId": identifier, "page": None, "quote": "", "verification": "akshare_structured", "verificationOrigin": "financial_database"}
             for p in data["points"]
         ]
-        self.database_info = {"status": "completed", "sourceId": identifier, **{k: v for k, v in data.items() if k != "points"}}
-        self.job.emit("financial_database_finished", f"结构化财务报表取得 {len(data['periods'])} 个报告期、{len(data['points'])} 个数值",
+        # 主营构成（分产品/地区/行业收入）同样直接用，替代年报分业务收入取数。
+        self.segment_points += [
+            {**p, "sourceId": identifier, "page": None, "quote": "", "verification": "akshare_structured", "verificationOrigin": "financial_database"}
+            for p in data["segmentPoints"]
+        ]
+        if not data["segmentsAvailable"]:
+            self.business_gaps.append("AKShare 主营构成暂时取不到；分业务收入改由年报原文取数。")
+        self.database_info = {"status": "completed", "sourceId": identifier, **{k: v for k, v in data.items() if k not in {"points", "segmentPoints"}}}
+        self.job.emit("financial_database_finished", f"结构化财务报表取得 {len(data['periods'])} 个报告期、{len(data['points'])} 个数值、"
+                      f"{len(data['segmentPoints'])} 条主营构成",
                       sourceId=identifier, cacheReused=data["cacheReused"])
         self.checkpoint()
 

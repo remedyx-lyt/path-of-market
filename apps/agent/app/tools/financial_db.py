@@ -1,7 +1,8 @@
-"""结构化财务报表 Provider：AKShare 封装的东方财富数据中心“按报告期”三大报表。
+"""结构化财务报表 Provider：AKShare 封装的东方财富数据中心“按报告期”三大报表与主营构成。
 
 程序只做字段映射、截止日过滤与缓存，数值原样进入底稿；模型不提供、不改写数字。
 来源：AKShare 文档 stock_profit_sheet_by_report_em / stock_balance_sheet_by_report_em / stock_cash_flow_sheet_by_report_em
+与 stock_zygc_em（主营构成：按行业/产品/地区的收入、成本、毛利率，只有年报与中报期）
 （akshare.akfamily.xyz，2026-10-26 以 1.19.3 实测字段）。
 """
 
@@ -42,6 +43,9 @@ FUNCTIONS = {
     "cashflow": "stock_cash_flow_sheet_by_report_em",
 }
 PERIOD_BY_DATE = {"12-31": "annual", "06-30": "h1", "03-31": "q1", "09-30": "q3"}
+# 主营构成没有披露日期，按同一报告期利润表的披露日套用研究截止日。
+SEGMENT_DIMENSIONS = {"按产品分类": "product", "按地区分类": "geography", "按行业分类": "industry"}
+SEGMENT_COLUMNS = ("报告日期", "分类类型", "主营构成", "主营收入", "毛利率")
 KEEP = ("REPORT_DATE", "NOTICE_DATE", "UPDATE_DATE", "CURRENCY")
 
 
@@ -77,6 +81,17 @@ def akshare_fetch(kind, symbol):
     ]
 
 
+def akshare_segments(symbol):
+    os.environ.setdefault("TQDM_DISABLE", "1")
+    import akshare
+
+    frame = akshare.stock_zygc_em(symbol=symbol)
+    return [
+        {c: (finite_number(v) if c in {"主营收入", "毛利率"} else str(v)) if v is not None and v == v else None for c, v in record.items()}
+        for record in frame[[c for c in SEGMENT_COLUMNS if c in frame.columns]].to_dict("records")
+    ]
+
+
 def finite_number(value):
     try:
         number = float(value)
@@ -88,12 +103,13 @@ def finite_number(value):
 class FinancialStatementProvider:
     """缓存按“证券 + 取数日期”保存原始行，同一天重复研究不再请求；缓存不提交。"""
 
-    def __init__(self, cache_root=None, fetch=None):
+    def __init__(self, cache_root=None, fetch=None, fetch_segments=None):
         self.cache_root = cache_root
         self.fetch = fetch or akshare_fetch
+        self.fetch_segments = fetch_segments or akshare_segments
 
     def raw_rows(self, symbol):
-        path = self.cache_root / "financial-db" / f"{symbol}-{date.today().isoformat()}.json" if self.cache_root else None
+        path = self.cache_root / "financial-db" / f"{symbol}-{date.today().isoformat()}-v2.json" if self.cache_root else None
         if path and path.exists():
             try:
                 return json.loads(path.read_text(encoding="utf-8")), True
@@ -108,11 +124,19 @@ class FinancialStatementProvider:
                 failures[kind] = True
                 return kind, []
 
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        def segments():
+            try:
+                return self.fetch_segments(symbol)
+            except Exception:  # 主营构成取不到不影响三大报表，记为 None，由调用方说明缺口
+                return None
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            pending = pool.submit(segments)
             rows = dict(pool.map(load, FIELDS))
+            rows["segments"] = pending.result()
         if failures:
             raise ToolError("FINANCIAL_DB_UNAVAILABLE", "AKShare 财务报表暂时取不到：" + "、".join(sorted(failures)), {"failed": sorted(failures)})
-        if path:
+        if path and rows["segments"] is not None:  # 主营构成失败时不缓存，下次研究重试
             write_json(path, rows)
         return rows, False
 
@@ -122,8 +146,8 @@ class FinancialStatementProvider:
         symbol = ("SH" if company["exchange"] == "SSE" else "SZ") + company["code"]
         rows, cached = self.raw_rows(symbol)
         points, periods, skipped_after = [], {}, 0
-        for kind, records in rows.items():
-            for record in records:
+        for kind in FIELDS:
+            for record in rows[kind]:
                 report_date, notice = str(record.get("REPORT_DATE") or "")[:10], str(record.get("NOTICE_DATE") or "")[:10]
                 period = PERIOD_BY_DATE.get(report_date[5:])
                 if not period or len(notice) != 10 or not report_date[:4].isdigit():
@@ -149,6 +173,25 @@ class FinancialStatementProvider:
                     })
         if not points:
             raise ToolError("FINANCIAL_DB_NO_DATA", "AKShare 未返回截止日前可用的财务报表数据。")
+        notices = {(p["year"], p["period"]): p["publishedAt"] for p in points if p["field"] == "OPERATE_INCOME"}
+        segment_points = []
+        for record in rows.get("segments") or []:
+            report_date = str(record.get("报告日期") or "")[:10]
+            period, dimension = PERIOD_BY_DATE.get(report_date[5:]), SEGMENT_DIMENSIONS.get(record.get("分类类型"))
+            value, label = finite_number(record.get("主营收入")), str(record.get("主营构成") or "").strip()
+            if not (period and dimension and label and value is not None and value >= 0 and report_date[:4].isdigit()):
+                continue
+            if label.startswith("其中"):  # “其中:外购金”是上一项的子项，计入会重复（山东黄金实测行业合计达营收141%）
+                continue
+            year = int(report_date[:4])
+            if (year, period) not in notices:  # 该期利润表在截止日前未披露，或不在年份范围内
+                continue
+            margin = finite_number(record.get("毛利率"))
+            segment_points.append({
+                "dimension": dimension, "label": label[:60], "year": year, "period": period, "value": value,
+                "rawValue": format(value, ".2f"), "unit": "元", "publishedAt": notices[(year, period)],
+                "grossMargin": round(margin * 100, 4) if margin is not None else None,
+            })
         url = f"https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/Index?type=web&code={symbol}"
         return {
             "company": company,
@@ -160,9 +203,11 @@ class FinancialStatementProvider:
             "latestNoticeDate": max(periods.values()),
             "periods": [{"year": y, "period": p, "noticeDate": n} for (y, p), n in sorted(periods.items())],
             "points": points,
+            "segmentPoints": segment_points,
+            "segmentsAvailable": rows.get("segments") is not None,
             "excludedAfterCutoff": skipped_after,
             "limitations": [
                 "结构化数据来自 AKShare 封装的东方财富数据中心，为统一口径的合并报表数；可能采用后续更正或重述后的数值，与当时原始披露偶有差异。",
-                "只按披露日期过滤到研究截止日；产能、产销量、客户集中度、分业务收入等不在三大报表中，仍以年报原文为准。",
+                "只按披露日期过滤到研究截止日；主营构成（分产品/地区/行业收入与毛利率）只有年报与中报期，套用同期利润表披露日；产能、产销量、客户集中度等仍以年报原文为准。",
             ],
         }

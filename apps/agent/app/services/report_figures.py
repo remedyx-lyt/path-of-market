@@ -7,6 +7,8 @@ import re
 from app.services.financial_data import PERIODS, SCALE
 
 DIMENSIONS = {"product": "产品", "geography": "地区", "industry": "行业"}
+# 年报正文取数模型自己写的缺口说明（多为“本页没有分部收入”等），加此前缀以便识别。
+EXTRACTION_NOTE = "年报取数说明："
 
 
 def compact(text):
@@ -162,6 +164,11 @@ def verified_segments(result, document, pages):
 
 
 def build_business_data(points, financial_data, gaps=(), *, history_years=3):
+    # 某维度某期有结构化主营构成（AKShare）时整期直接用它，不再混入年报取数（两边分项名称不同，不能逐项对齐）。
+    structured = {(p["dimension"], p["period"], p["year"]) for p in points if p.get("verificationOrigin") == "financial_database"}
+    points = [p for p in points if p.get("verificationOrigin") == "financial_database" or (p["dimension"], p["period"], p["year"]) not in structured]
+    if structured:  # 年报分项取数的失败提示不再列出，分业务收入已由结构化数据提供
+        gaps = [g for g in gaps if not g.endswith("收入未通过原文/金额/单位/期间核对，未进入业务图。") and not g.startswith(EXTRACTION_NOTE)]
     groups, issues = defaultdict(list), list(gaps)
     for p in points:
         groups[(p["dimension"], p["period"], p["year"], p["label"])].append(p)
@@ -215,7 +222,8 @@ def build_business_data(points, financial_data, gaps=(), *, history_years=3):
         "schemaVersion": 1,
         "datasets": datasets,
         "gaps": list(dict.fromkeys(issues)),
-        "method": "分产品、地区、行业各自独立；占比＝分项收入÷同期合并营收，缺项用总额扣除并标明，不能跨维度相加。",
+        "method": ("分产品、地区、行业各自独立；占比＝分项收入÷同期合并营收，缺项用总额扣除并标明，不能跨维度相加。"
+                   + ("分项收入与毛利率来自 AKShare 主营构成（东方财富数据中心，仅年报与中报期）。" if structured else "")),
     }
 
 

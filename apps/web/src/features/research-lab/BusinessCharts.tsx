@@ -59,7 +59,7 @@ export function BusinessCharts({ data, sources, ids, showDataLabels = true }: { 
             <p className="chart-source">来源：{refs(dataset.rows)}；同一维度、同期间展示，分类变化保留原披露名称。</p>
           </figure>}
         </div>
-        <details className="financial-table-details" open><summary>核对{dataset.label}金额与占比</summary><div className="table-scroll"><table className="research-table business-table"><thead><tr><th>期间</th><th>分项</th><th>收入（亿元）</th><th>占合并收入</th><th>来源</th></tr></thead><tbody>{dataset.rows.flatMap((r) => r.items.map((p) => <tr key={`${r.year}-${p.label}`}><td>{r.periodLabel}</td><td>{p.label}</td><td title={`${p.rawValue || p.value}${p.unit || '元'}`}>{(p.value/1e8).toFixed(2)}</td><td>{p.share.toFixed(2)}%</td><td>{p.derived ? <>总额减已知项；{sourceLink(r.totalEvidence.sourceId,r.totalEvidence.page)}</> : sourceLink(p.sourceId,p.page)}</td></tr>))}</tbody></table></div></details>
+        <details className="financial-table-details" open><summary>核对{dataset.label}金额与占比</summary><div className="table-scroll"><table className="research-table business-table"><thead><tr><th>期间</th><th>分项</th><th>收入（亿元）</th><th>占合并收入</th><th>毛利率</th><th>来源</th></tr></thead><tbody>{dataset.rows.flatMap((r) => r.items.map((p) => <tr key={`${r.year}-${p.label}`}><td>{r.periodLabel}</td><td>{p.label}</td><td title={`${p.rawValue || p.value}${p.unit || '元'}`}>{(p.value/1e8).toFixed(2)}</td><td>{p.share.toFixed(2)}%</td><td>{p.grossMargin == null ? '—' : `${p.grossMargin.toFixed(2)}%`}</td><td>{p.derived ? <>总额减已知项；{sourceLink(r.totalEvidence.sourceId,r.totalEvidence.page)}</> : sourceLink(p.sourceId,p.page)}</td></tr>))}</tbody></table></div></details>
       </div>
     })}
   </div>
