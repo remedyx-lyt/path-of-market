@@ -141,7 +141,7 @@ class CompactionMixin:
         if args.section_index >= len(sections):
             raise ToolError("CONTEXT_NOT_AVAILABLE", "本分支没有该报告章节；研究阶段可先回查阅读笔记。")
         section = sections[args.section_index]
-        return {"sectionIndex": args.section_index, "section": {k: deepcopy(section[k]) for k in ("heading", "content", "citations", "topics", "omens") if k in section},
+        return {"sectionIndex": args.section_index, "section": {k: deepcopy(section[k]) for k in ("heading", "content", "citations", "topics", "omens", "tables") if k in section},
                 "origin": "saved_report_section", "tablesPreserved": True}
 
     async def prepare_context(self, messages, *, report=False):

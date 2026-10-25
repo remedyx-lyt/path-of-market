@@ -20,7 +20,7 @@ STATE_FIELDS = (
     "market_data", "visual_readings", "extraction_readings", "financial_points", "financial_gaps", "segment_points",
     "business_gaps", "method_usage", "action_counts", "report_candidate", "table_gaps", "wrapup_gaps", "restored_financial",
     "writing_state", "writer_tools_rejected", "report_stage", "review_outcome",
-    "compaction_state", "compaction_count",
+    "compaction_state", "compaction_count", "discussion_context_version",
     "history_checked", "required_annual", "history_gap",
 )
 SET_FIELDS = ("financial_checked", "detail_checked")

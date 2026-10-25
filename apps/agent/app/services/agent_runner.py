@@ -192,6 +192,7 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
         self.context_prefix_length = len(initial_messages(job.request))
         self.compaction_state = None
         self.compaction_count = 0
+        self.discussion_context_version = 0
         self.compaction_attempts = 0
         self.compaction_failed_at = None
         self.user_memory = None

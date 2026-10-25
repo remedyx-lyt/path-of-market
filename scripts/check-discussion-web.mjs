@@ -37,8 +37,10 @@ try {
   assert.match(html, /报告对话/)
   assert.match(html, /report-version/)
   const preview = renderToStaticMarkup(createElement(ResearchPreview, { draft: null, report: data.versions[0].report,
-    isGenerating: false, hasError: false, job: { events: [{ id: 'x', type: 'run_completed', message: 'done' }], modelCalls: 3, usage: {} } }))
-  assert.match(preview, /查看研究过程与工具记录/)
+    isGenerating: false, hasError: false, job: { taskId: data.versions[0].report.run.taskId,
+      status: 'completed', startedAt: data.versions[0].report.run.startedAt,
+      events: [{ id: 'x', type: 'run_completed', message: 'done' }], modelCalls: 3, usage: {} } }))
+  assert.match(preview, /查看完整研究过程与工具记录/)
   const escaped = renderToStaticMarkup(createElement(ReportText, { text: '<script>alert(1)</script> **结论**' }))
   assert.doesNotMatch(escaped, /<script>/)
   assert.match(escaped, /<strong>结论<\/strong>/)
