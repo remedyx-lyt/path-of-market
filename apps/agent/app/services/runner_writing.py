@@ -19,10 +19,24 @@ METADATA_MARKER = "WRITE_REPORT_METADATA\n"
 
 
 def json_body(raw):
+    raw = raw.strip()
+    if raw.startswith("```json\n") and raw.endswith("```"):
+        raw = raw[8:-3].strip()
     try:
         return json.loads(raw)
-    except ValueError:
-        return json.loads(escape_inner_quotes(raw))
+    except json.JSONDecodeError as error:
+        if error.msg != "Extra data":
+            return json.loads(escape_inner_quotes(raw))
+        # 有些模型把一个对象的字段分成几个完整JSON对象；只合并键互不重叠的对象。
+        # 不忽略尾部文字、不吞掉截断内容、不选取相互矛盾的一个版本；之后仍严格校验业务schema。
+        decoder, merged, remaining = json.JSONDecoder(), {}, raw
+        while remaining:
+            body, end = decoder.raw_decode(remaining)
+            if not isinstance(body, dict) or merged.keys() & body.keys():
+                raise ValueError("多个JSON对象含重复字段或非对象内容，无法确定唯一结果")
+            merged.update(body)
+            remaining = remaining[end:].lstrip()
+        return merged
 
 
 class WritingMixin:
@@ -35,9 +49,19 @@ class WritingMixin:
         """只重试当前写作单元；暂时故障/格式问题最多一次，账户类错误立即保留进度。"""
         previous = (self.writing_state or {}).get("lastFailure")
         if previous and previous["unit"] == label:
+            if previous.get("response") and not previous.get("responseTruncated"):
+                try:
+                    recovered = parse(json_body(previous["response"]))
+                except ValueError:
+                    pass
+                else:
+                    self.writing_state.pop("lastFailure", None)
+                    self.job.emit("writing_unit_recovered", label + "已从保存的完整回复通过本地校验恢复，无需重新调用模型")
+                    return recovered
             prompt += "\n上次在当前部分失败，继续时须修正这些问题，不要照抄失败结构：" + "；".join(previous["problems"])
         messages = (self.context() if base_messages is None else list(base_messages)) + [{"role": "user", "content": prompt}]
         for attempt in range(2):
+            message = None
             try:
                 kwargs = {} if self.writer_tools_rejected else {"tool_specs": self.declarations(), "write_only": True}
                 message = await self.model(messages, report=True, output_limit=token_limit, **kwargs)
@@ -52,6 +76,9 @@ class WritingMixin:
                     raise
                 if self.writing_state:
                     self.writing_state["lastFailure"] = {"unit": label, "problems": validation_problems(error)}
+                    if message and isinstance(message.get("content"), str):
+                        raw = message["content"]
+                        self.writing_state["lastFailure"].update(response=raw[:120000], responseTruncated=len(raw) > 120000)
                     self.save_writing()
                 if attempt:
                     self.job.emit("writing_unit_failed", label + "尚未完成，已保存之前的成功章节", problems=validation_problems(error))
@@ -130,7 +157,10 @@ class WritingMixin:
             prompt = METADATA_MARKER + json.dumps({"title": outline["title"], "sections": state["sections"]}, ensure_ascii=False) + (
                 '\n基于以上已写完的章节，仅返回JSON {"summary":"核心判断、研究期间与局限","omenCoverage":[{"omen":"所选ID","addressed":["实际回答的要点"],"missingItems":["未解决的问题"]}]}。'
                 "不要返回正文，不要把没有回答的内容写成已覆盖。"
-            ) + "\n" + self.omen_writing_instruction()
+            ) + "\n所选视角及其自检要求（用于归纳已有正文，不是让你新增正文）：" + json.dumps(self.omen_review_payload(), ensure_ascii=False) + (
+                '\n只返回一个完整JSON对象：summary字符串（最多3000字），omenCoverage数组；每项仅含omen、addressed、missingItems。'
+                "数组中每个所选ID恰好一次，无所选ID时为空数组。不要使用代码块，不输出第二个JSON或尾部说明。"
+            )
 
             def metadata(body):
                 if not isinstance(body, dict) or set(body) - {"summary", "omenCoverage"}:
