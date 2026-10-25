@@ -30,7 +30,7 @@ export function BusinessCharts({ data, sources, ids, showDataLabels = true }: { 
         return [...labels,{id:`${row.year}-total`,x,y:top,preferredY:top-10,text:(row.total/1e8).toFixed(2),
           description:`${row.periodLabel} 总收入：${(row.total/1e8).toFixed(2)}亿元`}]
       })
-      const sourceLink = (sourceId: string | undefined,page: number | undefined) => {
+      const sourceLink = (sourceId: string | undefined,page: number | null | undefined) => {
         const s=sources.find((s) => s.sourceId===sourceId)
         return s && page ? <a href={`${s.url}#page=${page}`} target="_blank" rel="noreferrer" title={s.title}>{s.title} · PDF第{page}页 ↗ </a> : null
       }

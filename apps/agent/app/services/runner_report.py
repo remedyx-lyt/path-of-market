@@ -35,10 +35,11 @@ OPERATING_WORDS = ("产能", "产量", "销量", "库存")
 
 
 def operating_table_present(tables, located):
-    """是否已有产能/产销表：标题或列名含产能/产量/销量/库存，且引用了程序定位到的经营数据页。只引用同一页的其他表不算。"""
+    """是否已有产能/产销表：标题或列名含产能/产量/销量/库存，且引用了程序定位到的经营数据页（只引用到资料时按资料算）。"""
+    sources = {sid for sid, _ in located}
     return any(
         any(w in table.title + "".join(table.columns) for w in OPERATING_WORDS)
-        and located & {(c.source_id, c.page) for row in table.rows for c in [row, *row.also_from]}
+        and any((c.source_id, c.page) in located or c.page is None and c.source_id in sources for row in table.rows for c in [row, *row.also_from])
         for table in tables
     )
 
@@ -272,17 +273,40 @@ class ReportMixin:
         return gaps
 
     def check_citation(self, citation):
+        """来源层级的核对：资料必须是本次实际取得并读完的。PDF 可只引用到资料（page=null），给了页码则须是已读页。"""
         source = self.sources.get(citation.source_id)
         if source and source["kind"] == "web":
             return (citation.page is None and bool(source.get("publishedAt"))
                     and source["publishedAt"] <= self.job.request.as_of_date.isoformat()
                     and source.get("citationEligible") is True
                     and self.coverage.get(citation.source_id, {}).get("textComplete") is True)
-        return source is not None and (
-            source["kind"] != "document"
-            or citation.page is not None
-            and page_read(self.coverage.get(citation.source_id), citation.page)
-        )
+        if source is None or source["kind"] != "document":
+            return source is not None
+        coverage = self.coverage.get(citation.source_id)
+        return page_read(coverage, citation.page) if citation.page is not None else reading_complete(coverage)
+
+    def loosen_page(self, source_id, page):
+        """页码不再决定引用是否通过（用户 2026-10-26 决定）：已读 PDF 页保留，其余页码去掉、来源保留。返回 (页码, 是否去掉)。"""
+        source = self.sources.get(source_id)
+        if page is None or source is None or source["kind"] == "document" and page_read(self.coverage.get(source_id), page):
+            return page, False
+        return None, True
+
+    def loosen_citations(self, sections):
+        """正文、定性图和数据表里对不上的页码统一去掉，不为页码退回重写或丢图丢表。"""
+        cleared = 0
+        for section in sections:
+            citations = list(section.citations) + [c for node in (section.visual.nodes if section.visual else []) for c in node.citations]
+            for table in section.tables:
+                for row in table.rows:
+                    row.page, dropped = self.loosen_page(row.source_id, row.page)
+                    cleared += dropped
+                    citations += row.also_from
+            for citation in citations:
+                citation.page, dropped = self.loosen_page(citation.source_id, citation.page)
+                cleared += dropped
+        if cleared:
+            self.job.emit("citation_pages_cleared", f"{cleared} 处引用页码与已读页对不上，只保留来源资料", count=cleared)
 
     def require_evidence(self, ok, retry_message, gap):
         """证据是否到位。正常取证中不到位就退回让模型补；收尾写作时已不能再取证，改为记入局限，不宣称完成。"""
@@ -353,11 +377,12 @@ class ReportMixin:
             f"当年最新已披露报告尚未通读，请以 mode=full 阅读 {current['documentId']}：{current['title']}" if current else "",
             f"当年最新已披露报告未通读：{current['title']}" if current else "",
         )
+        self.loosen_citations(content.sections)
         citations = [c for section in content.sections for c in section.citations]
         if not citations:
             raise ValueError("最终章节需要引用实际来源")
         if not all(self.check_citation(c) for c in citations):
-            raise ValueError("引用必须指向本次实际处理的来源和页码")
+            raise ValueError("引用必须指向本次实际取得并读完的资料（sourceId）；网页须已通读且发布日期不晚于截止日")
         chart_ids = {c["id"] for c in self.financial_data()["charts"]}
         business_ids = {d["id"] for d in self.business_data()["datasets"]}
         if self.job.request.include_financials and chart_ids and not any(s.chart_ids for s in content.sections):
@@ -374,11 +399,11 @@ class ReportMixin:
             section.business_ids = [i for i in section.business_ids if i not in used]
             used |= set(section.chart_ids + section.business_ids)
             if section.visual and not all(self.check_citation(c) for node in section.visual.nodes for c in node.citations):
-                raise ValueError("定性图节点也须引用实际已读来源和页码。")
+                raise ValueError("定性图节点也须引用本次实际读完的来源。")
             if not all(
                 self.check_citation(c) for t in section.tables for row in t.rows for c in [Citation(sourceId=row.source_id, page=row.page), *row.also_from]
             ):
-                raise ValueError("tables 每行须引用本次实际处理的来源和页码（sourceId、page）。")
+                raise ValueError("tables 每行须引用本次实际读完的来源（sourceId）。")
         self.place_required_figures(content)
         self.validate_omens(content)
         if unknown:
@@ -564,9 +589,13 @@ class ReportMixin:
                 problems = error.errors() if hasattr(error, "errors") else []
                 reasons.append(f"「{title}」" + ("；".join(".".join(map(str, e["loc"])) + " " + e["msg"] for e in problems[:2]) or str(error)[:80]))
                 continue
+            for row in table.rows:  # 页码对不上只去掉页码，不丢整张表
+                row.page = self.loosen_page(row.source_id, row.page)[0]
+                for citation in row.also_from:
+                    citation.page = self.loosen_page(citation.source_id, citation.page)[0]
             bad = [c for row in table.rows for c in [Citation(sourceId=row.source_id, page=row.page), *row.also_from] if not self.check_citation(c)]
             if bad:
-                reasons.append(f"「{title}」来源页不是本次已读页：{bad[0].source_id} 第{bad[0].page}页")
+                reasons.append(f"「{title}」引用的资料不是本次已读来源：{bad[0].source_id}")
                 continue
             accepted.append((section, table))
         if reasons:
@@ -686,6 +715,8 @@ class ReportMixin:
                             if s["kind"] == "web" and not s.get("publishedAt")]
         if self.market_data:
             limitations += self.market_data["limitations"]
+        if (self.database_info or {}).get("status") == "completed":
+            limitations += self.database_info["limitations"]
         if self.current_period_gap:
             limitations.append(self.current_period_gap)
         if self.history_gap:
@@ -712,6 +743,7 @@ class ReportMixin:
             "coverage": list(self.coverage.values()),
             "annualHistory": self.annual_context(),
             "marketData": self.market_data,
+            "financialDatabase": self.database_info,
             "financialData": financial_data if self.job.request.include_financials or self.financial_points else None,
             "visualReadings": self.visual_readings,
             "researchSkill": {k: self.skill[k] for k in ["name", "version", "upstream"]},

@@ -17,7 +17,7 @@ from app.tools.documents import write_json
 
 STATE_FIELDS = (
     "notes", "sources", "coverage", "discovered", "web_discovered", "current_period_checked", "required_current", "current_period_gap",
-    "market_data", "visual_readings", "extraction_readings", "financial_points", "financial_gaps", "segment_points",
+    "market_data", "database_info", "visual_readings", "extraction_readings", "financial_points", "financial_gaps", "segment_points",
     "business_gaps", "method_usage", "action_counts", "report_candidate", "table_gaps", "wrapup_gaps", "restored_financial",
     "writing_state", "writer_tools_rejected", "report_stage", "review_outcome",
     "compaction_state", "compaction_count", "discussion_context_version", "discussion_source_baseline",

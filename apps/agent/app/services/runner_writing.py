@@ -89,7 +89,7 @@ class WritingMixin:
                     self.writer_tools_rejected = True
                     self.job.emit("report_drafting_fallback", label + "改用不带工具定义重试，已完成章节保留")
                 self.job.emit("writing_unit_retry", label + "暂未完成，仅重试当前部分", attempt=attempt + 1)
-                messages[-1] = {"role": "user", "content": prompt + "\n只修正当前输出，不重写其他章节。严格按指定JSON字段、实际来源与页码输出；正文精简到约1500字。问题：" + "；".join(validation_problems(error))}
+                messages[-1] = {"role": "user", "content": prompt + "\n只修正当前输出，不重写其他章节。严格按指定JSON字段与实际来源输出；正文精简到约1500字。问题：" + "；".join(validation_problems(error))}
                 await asyncio.sleep(0.2)
 
     def parse_outline(self, body):
@@ -119,8 +119,10 @@ class WritingMixin:
         raw, _ = normalize_report(json.dumps({"title": "章节", "summary": "章节", "sections": [body]}, ensure_ascii=False))
         section = AgentSection.model_validate(json.loads(raw)["sections"][0])
         citations = section.citations + [c for node in (section.visual.nodes if section.visual else []) for c in node.citations]
+        for citation in citations:  # 页码对不上只去掉页码，不为此重写章节
+            citation.page = self.loosen_page(citation.source_id, citation.page)[0]
         if not section.citations or not all(self.check_citation(c) for c in citations):
-            raise ValueError("章节必须引用本次实际已读的来源和页码")
+            raise ValueError("章节必须引用本次实际读完的来源（sourceId）")
         return section.model_dump(mode="json", by_alias=True)
 
     async def compose(self):
@@ -145,7 +147,7 @@ class WritingMixin:
             }
             prompt = SECTION_MARKER + json.dumps(task, ensure_ascii=False) + "\n" + REPORT_RULES + "\n" + self.omen_writing_instruction() + (
                 "\n本次只返回当前一个章节对象，不返回整个报告、sections数组或ready。格式："
-                '{"heading":"标题","content":"约1000至2000字的中文分析","topics":[],"omens":[],"citations":[{"sourceId":"实际来源","page":1}],"chartIds":[],"businessIds":[],"visual":null}。'
+                '{"heading":"标题","content":"约1000至2000字的中文分析","topics":[],"omens":[],"citations":[{"sourceId":"实际来源","page":null}],"chartIds":[],"businessIds":[],"visual":null}。'
                 "只用实际已读证据，区分事实、计算与假设；选有用的实际图表ID；本步不输出数据表。不要复述其他章节。"
             )
             section = await self.writing_json(prompt, lambda body: self.parse_section(body, planned), label=f"第{index + 1}节", token_limit=6000)

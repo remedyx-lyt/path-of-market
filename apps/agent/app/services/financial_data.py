@@ -107,6 +107,13 @@ def verified_points(result, document, pages, unit_context=None):
     return accepted, gaps
 
 
+def precision(point):
+    """原值的最小刻度（元）：如 1,234.56 万元 → 100 元。用于判断不同来源的数是否只差在四舍五入。"""
+    raw = point["rawValue"].replace(",", "")
+    decimals = len(raw.split(".")[1]) if "." in raw else 0
+    return SCALE[point["unit"]] / Decimal(10) ** decimals
+
+
 def yoy(current, previous):
     if previous is None:
         return {"value": None, "reason": "缺少上年同期间数据"}
@@ -124,18 +131,16 @@ def build_financial_data(points, gaps=(), *, history_years=3):
         groups.setdefault(key, []).append(point)
     values = {}
     for key, candidates in groups.items():
+        database = [p for p in candidates if p.get("verificationOrigin") == "financial_database"]
         primary = [p for p in candidates if p.get("verificationOrigin") == "automatic_financial_summary"]
-        if primary:
+        if database:
+            # 结构化报表（合并口径、元为单位）有这一项就直接用，不再与年报原文取数比对（用户 2026-10-26 决定）。
+            candidates = database
+        elif primary:
             candidates = primary
         elif any(p.get("quote") for p in candidates):
             candidates = [p for p in candidates if p.get("quote")]
         if len({p["value"] for p in candidates}) > 1:
-
-            def precision(p):
-                raw = p["rawValue"].replace(",", "")
-                decimals = len(raw.split(".")[1]) if "." in raw else 0
-                return SCALE[p["unit"]] / Decimal(10) ** decimals
-
             finest = min(candidates, key=precision)
             if all(
                 p["value"] == finest["value"]
@@ -211,7 +216,8 @@ def build_financial_data(points, gaps=(), *, history_years=3):
                     }
                 )
     if not datasets:
-        issues.append("尚无通过原页与数字核对的财务底稿，无法生成财务图表。")
+        issues.append("尚无可用的财务底稿（结构化报表或年报原文取数），无法生成财务图表。")
+    structured = any(p.get("verificationOrigin") == "financial_database" for p in points)
     return {
         "schemaVersion": 1,
         "datasets": datasets,
@@ -225,5 +231,10 @@ def build_financial_data(points, gaps=(), *, history_years=3):
             "rdExpenseRatio": "研发费用率",
             "rdInvestmentRatio": "研发投入占营收",
         },
-        "method": "先视觉核对原页，再匹配本页文字数字；金额统一元，图示亿元；同比仅同期间且正基数，不能把此校验当独立审计。",
+        "method": (
+            "标准财务数直接取自 AKShare（东方财富数据中心）结构化三大报表，合并口径；报表里没有的研发投入等才用年报原文取数。"
+            "金额统一元，图示亿元；同比仅同期间且正基数，不能当独立审计。"
+            if structured
+            else "先视觉核对原页，再匹配本页文字数字；金额统一元，图示亿元；同比仅同期间且正基数，不能把此校验当独立审计。"
+        ),
     }

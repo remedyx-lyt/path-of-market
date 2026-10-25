@@ -221,6 +221,7 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
         self.required_current = None
         self.current_period_gap = None
         self.market_data = None
+        self.database_info = None  # 结构化财务报表（AKShare）取数状态：None 未尝试
         # 数值证据（runner_evidence）
         self.visual_readings, self.extraction_readings = [], []
         self.financial_points, self.financial_gaps = [], []

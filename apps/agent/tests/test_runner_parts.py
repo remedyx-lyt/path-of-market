@@ -175,7 +175,9 @@ class RunnerParts(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         bad_section = {**good, "section": 9}
         raw = json.dumps({"tables": [good, bad_page, bad_section]}, ensure_ascii=False).replace("好表", '好"表"')
         parsed = runner.parse_tables(raw, 2)
-        self.assertEqual([t.title for _, t in parsed], ['好"表"'])
+        # 页码对不上的表保留、只去掉页码（引用到资料）；章节序号无效的仍去掉。
+        self.assertEqual([t.title for _, t in parsed], ['好"表"', "页码不对"])
+        self.assertEqual([t.rows[0].page for _, t in parsed], [2, None])
         numeric = {"section": "0", "title": "数值格", "columns": ["产量", "毛利率"], "rows": [{"label": 2025, "cells": [2376, 42.61], "sourceId": DOC_ID, "page": 2}]}
         parsed = runner.parse_tables(json.dumps({"tables": [numeric]}), 2)  # 真实运行中模型常把数字写成数值
         self.assertEqual(parsed[0][1].rows[0].cells, ["2376", "42.61"])

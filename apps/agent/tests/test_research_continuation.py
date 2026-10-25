@@ -70,9 +70,19 @@ class Continuation(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(model.count("compose"), 0)
         self.assertEqual(model.count("metadata"), 1)
 
-    async def test_bad_chapter_citation_is_not_saved_as_success(self):
+    async def test_wrong_chapter_page_keeps_source_without_rewrite(self):
+        # 2026-10-26 用户决定引用不强制到页：页码对不上只去掉页码，章节照常保存。
+        wrong = FakeModel(ready=True)
+        wrong.final["sections"][0]["citations"][0]["page"] = 999
+        job, runner = self.runner(wrong)
+        await runner.run()
+        self.assertEqual(job.status, "completed", job.error)
+        self.assertIsNone(runner.writing_state["sections"][0]["citations"][0]["page"])
+        self.assertFalse(any(e["type"] == "writing_unit_failed" for e in job.events))
+
+    async def test_unknown_chapter_source_is_not_saved_as_success(self):
         bad = FakeModel(ready=True)
-        bad.final["sections"][0]["citations"][0]["page"] = 999
+        bad.final["sections"][0]["citations"][0]["sourceId"] = "cninfo-9999999999"
         job, runner = self.runner(bad)
         await runner.run()
         self.assertEqual(job.status, "failed")

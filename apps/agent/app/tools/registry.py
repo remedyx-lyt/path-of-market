@@ -21,6 +21,7 @@ from app.tools.contracts import (
     ToolError,
 )
 from app.tools.documents import DocumentStore
+from app.tools.financial_db import FinancialStatementArguments, FinancialStatementProvider
 from app.tools.market import MarketArguments, MarketProvider
 from app.schemas.financial import InspectArguments
 from app.tools.visuals import render_pages
@@ -62,14 +63,22 @@ TOOLS = (
         "get_market_data", "查询沪深股票日线、不复权价格与后复权序列，程序计算区间变化、回撤、波动及月度表现。", MarketArguments, "market"
     ),
     ToolDefinition("render_document_pages", "将已获取的PDF物理页渲染为PNG；渲染不等于模型已经理解。", InspectArguments, "render"),
+    ToolDefinition(
+        "get_financial_statements",
+        "通过 AKShare 取沪深A股三大报表（东方财富数据中心按报告期），按披露日过滤到截止日，返回合并口径标准财务数。",
+        FinancialStatementArguments,
+        "statements",
+    ),
 )
 
 
 class ResearchTools:
-    def __init__(self, root: Path | None = None, provider=None, market_provider=None, public_web=None):
+    def __init__(self, root: Path | None = None, provider=None, market_provider=None, public_web=None, statement_provider=None):
         self.provider = provider or CninfoProvider()
         self.store = DocumentStore(root if root is not None else PROJECT_ROOT / "storage/documents")
         self.market_provider = market_provider or MarketProvider()
+        # 注入假巨潮来源（离线测试）时不默认联网取结构化报表，除非同时注入假报表来源。
+        self.statement_provider = statement_provider or (FinancialStatementProvider(self.store.root) if provider is None else None)
         self.public_web = public_web or PublicWeb(self.store.root)
         self.definitions = {tool.name: tool for tool in TOOLS}
 
@@ -143,6 +152,12 @@ class ResearchTools:
     def market(self, args):
         company = self.provider.resolve_company(args.company)
         return self.market_provider.history(company, args.start_date, args.end_date)
+
+    def statements(self, args):
+        if self.statement_provider is None:
+            raise ToolError("FINANCIAL_DB_DISABLED", "本环境未启用结构化财务报表来源。")
+        company = self.provider.resolve_company(args.company)
+        return self.statement_provider.statements(company, args.start_year, args.end_year, args.as_of_date)
 
     def render(self, args):
         return render_pages(self.store, args.model_dump(by_alias=True))

@@ -79,7 +79,11 @@ class EvidenceMixin:
         return self.document_cache[identifier]
 
     def page_text(self, identifier, page):
-        if self.sources.get(identifier, {}).get("kind") == "web":
+        """核对表格数字用的原文。PDF 有页码取该页，无页码取整份资料；结构化报表取本次入底稿的数值。"""
+        kind = self.sources.get(identifier, {}).get("kind")
+        if kind == "database":
+            return " ".join(p["rawValue"] for p in self.financial_points if p["sourceId"] == identifier)
+        if kind == "web":
             progress = self.coverage.get(identifier, {})
             if page is None and progress.get("textComplete"):
                 snapshot = self.tools.public_web.load(identifier, progress.get("snapshotSha256"))
@@ -87,7 +91,7 @@ class EvidenceMixin:
                     return snapshot["text"]
             return ""
         if page is None:
-            return ""
+            return "\n".join(p["text"] for p in self.document_pages(identifier)) if kind == "document" else ""
         pages = self.document_pages(identifier)
         return pages[page - 1]["text"] if 0 < page <= len(pages) else ""
 
@@ -268,11 +272,60 @@ class EvidenceMixin:
             "limitations": ["只检查所列图片页；数值匹配不证明所有列序与会计口径都无误，保留来源供核查。"],
         }
 
+    async def database_financials(self):
+        """结构化财务报表（AKShare）：主公司每次研究只取一次，作财务底稿主来源。失败只记缺口，仍走年报原页取数。"""
+        if not self.job.request.include_financials or self.database_info is not None:
+            return
+        if getattr(self.tools, "statement_provider", None) is None:
+            self.database_info = {"status": "disabled"}
+            return
+        as_of = self.job.request.as_of_date
+        arguments = {"company": self.job.request.target, "startYear": as_of.year - max(3, history_count(self.job.request)),
+                     "endYear": as_of.year, "asOfDate": as_of.isoformat()}
+        self.job.emit("financial_database_started", "AKShare 取结构化财务报表：" + self.job.request.target)
+        try:
+            data = await asyncio.wait_for(self.raw_tool("get_financial_statements", arguments), 240)
+        except (ToolError, TimeoutError) as error:
+            message = error.message if isinstance(error, ToolError) else "AKShare 取数超时"
+            self.database_info = {"status": "failed", "message": message}
+            self.financial_gaps.append(message + "；财务数字改由年报原文取数。")
+            self.job.emit("financial_database_failed", message + "，改用年报原文取数")
+            self.checkpoint()
+            return
+        identifier = "akshare-" + data["company"]["code"]
+        self.sources[identifier] = {
+            "sourceId": identifier,
+            "kind": "database",
+            "title": data["company"]["name"] + "三大财务报表（" + data["provider"] + "）",
+            "url": data["sourceUrl"],
+            "publishedAt": data["latestNoticeDate"],
+            "retrievedAt": data["retrievedAt"],
+        }
+        self.job.sources = list(self.sources.values())
+        self.financial_points += [
+            {**p, "sourceId": identifier, "page": None, "quote": "", "verification": "akshare_structured", "verificationOrigin": "financial_database"}
+            for p in data["points"]
+        ]
+        self.database_info = {"status": "completed", "sourceId": identifier, **{k: v for k, v in data.items() if k != "points"}}
+        self.job.emit("financial_database_finished", f"结构化财务报表取得 {len(data['periods'])} 个报告期、{len(data['points'])} 个数值",
+                      sourceId=identifier, cacheReused=data["cacheReused"])
+        self.checkpoint()
+
+    def database_covers(self, metadata):
+        """结构化报表是否已有这份报告所属期间的营业收入（有则不必再视觉读主要会计数据页）。"""
+        period = {"annual": "annual", "interim": "h1", "q1": "q1", "q3": "q3"}.get(metadata.get("reportType", "annual"))
+        return any(p.get("verificationOrigin") == "financial_database" and p["metric"] == "revenue"
+                   and p["year"] == metadata["fiscalYear"] and p["period"] == period for p in self.financial_points)
+
     async def financial_summary(self, identifier):
         if not self.job.request.include_financials or identifier in self.financial_checked:
             return
         self.financial_checked.add(identifier)
+        await self.database_financials()
         metadata, pages = await asyncio.to_thread(self.tools.store.loaded, identifier)
+        if self.database_covers(metadata):
+            self.job.emit("financial_summary_skipped", metadata["title"] + "：主要财务数已由结构化报表提供，不再视觉读取会计数据页", sourceId=identifier)
+            return
         selected = locate_summary_pages(pages)
         if not selected:
             self.financial_gaps.append(metadata["title"] + "：未定位主要会计数据页，尚无自动结构化财务取数。")

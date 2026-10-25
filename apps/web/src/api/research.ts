@@ -27,7 +27,7 @@ export type ModelResearchReport = Omit<MockResearchReport, 'mode' | 'isMock'> & 
     startedAt: string; finishedAt: string; stopReason: 'model_response_received'
   }
 }
-export type EvidenceSource = { sourceId: string; kind: 'document' | 'market' | 'web'; title: string; url: string; publishedAt: string; pageCount?: number; retrievedAt?: string; citationEligible?: boolean; dateStatus?: string }
+export type EvidenceSource = { sourceId: string; kind: 'document' | 'market' | 'web' | 'database'; title: string; url: string; publishedAt: string; pageCount?: number; retrievedAt?: string; citationEligible?: boolean; dateStatus?: string }
 export type ReadCoverage = { sourceId: string; pageCount: number; processedPages: number[]; processedCharacters: number; textComplete: boolean; batches: number; emptyTextPages: number[]; unit?: 'segment' | 'page'; fetchComplete?: boolean; fetchedCharacters?: number; readingComplete?: boolean; visuallyProcessedPages?: number[] }
 export type MarketSeries = { date: string; close: number; adjustedClose: number; volume: number }
 export type MarketData = {
@@ -38,7 +38,7 @@ export type MarketData = {
 export type FinancialRow = {
   year: number; periodLabel: string; values: Record<string, number>
   yoy: Record<string, { value: number | null; reason: string }>
-  evidence: Record<string, { sourceId: string; page: number; rawValue: string; unit: string; verification: string }>
+  evidence: Record<string, { sourceId: string; page: number | null; rawValue: string; unit: string; verification: string }>
 }
 export type FinancialData = {
   schemaVersion: 1; datasets: { id: string; label: string; rows: FinancialRow[] }[]

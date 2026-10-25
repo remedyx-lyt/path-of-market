@@ -18,7 +18,8 @@ function TableFigure({ table, sources, showDataLabels }: { table: SectionTable; 
   const unmatched = new Set((table.verification?.unmatched ?? []).map(([r, c]) => `${r}:${c}`))
   const link = (sourceId: string, page: number | null) => {
     const source = sources.find((s) => s.sourceId === sourceId)
-    if (source && page == null) return <a href={source.url} target="_blank" rel="noreferrer" title={source.title}>行情数据 ↗</a>
+    const label = { market: '行情数据', database: '财务报表数据', web: '网页', document: '原文' }[source?.kind ?? 'document']
+    if (source && page == null) return <a href={source.url} target="_blank" rel="noreferrer" title={source.title}>{label} ↗</a>
     return source ? <a href={`${source.url}#page=${page}`} target="_blank" rel="noreferrer" title={source.title}>第{page}页 ↗</a> : null
   }
   const v = table.verification
@@ -30,14 +31,14 @@ function TableFigure({ table, sources, showDataLabels }: { table: SectionTable; 
       <tbody>{table.rows.map((row, r) => <tr key={r}>
         <th scope="row" title={row.note || undefined}>{row.label}{row.note ? <span className="row-note">{row.note}</span> : null}</th>
         {row.cells.map((cell, c) => unmatched.has(`${r}:${c}`)
-          ? <td key={c} className="cell-unverified" title="未在所引原页找到该数字，可能是计算值">{cell}*</td>
+          ? <td key={c} className="cell-unverified" title="未在所引资料中找到该数字，可能是计算值">{cell}*</td>
           : <td key={c}>{cell}</td>)}
         <td>{link(row.sourceId, row.page)}{row.alsoFrom?.map((c, j) => <span key={j}> {link(c.sourceId, c.page ?? null)}</span>)}</td>
       </tr>)}</tbody>
     </table></div>
     <p className="chart-source">
       {table.note ? `${table.note} ` : ''}
-      {v ? `程序核对：${v.matchedCells}/${v.checkedCells} 个数字在所引原页找到${unmatched.size ? '；标 * 的未在原页找到，多为计算值，请按说明核对' : ''}。` : ''}
+      {v ? `程序核对：${v.matchedCells}/${v.checkedCells} 个数字在所引资料中找到${unmatched.size ? '；标 * 的未在资料中找到，多为计算值，请按说明核对' : ''}。` : ''}
       表格由模型根据已读原文整理。
     </p>
   </figure>

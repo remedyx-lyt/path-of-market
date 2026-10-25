@@ -205,3 +205,13 @@ Java `ResearchMemoryStore`保存在已忽略的`sessions/memory/user.json`，临
 实际追问失败不是搜索为空，而是auto允许模型连续三次直接回答；答后反复校验缺证据不能替代工具执行。核对[DeepSeek原生工具选择](https://api-docs.deepseek.com/api/create-chat-completion/)：指定函数在关闭thinking时可用；本项目原客户端已关闭。采用标准named tool_choice：显式补查先检索，有候选再读，关键词/来源仍由模型选。无新证据时不让文字解释冒充成功，站点失败则换词/候选，原预算与真实引用条件保留。
 
 补查决策只传提要、目录、本轮工具结果及已读笔记；未读搜索摘要数字不送进答案生成。沿用Pi式assistant/tool消息循环、JSONL、当前分支与检查点，不用一条提示词假装约束已落实。DeepSeek[独立Search/Fetch API](https://api-docs.deepseek.com/guides/search/)确实可联网，本项目当前仍是Exa/Fetch MCP，未接原生搜索。真实两轮与最终逐来源核验、具体文件入口和边界见[补查修复交接](discussion-search-repair.md)。
+
+## 2026-10-26：结构化财务报表（AKShare）与引用只到资料
+
+用户决定两件事：引用不再要求精确到页；财务数字接 AKShare 直接用，不与年报比对，年报负责经营细节、业务结构、产能、风险和管理层表述。
+
+- 来源核对：AKShare 1.19.3 文档的 `stock_profit_sheet_by_report_em` / `stock_balance_sheet_by_report_em` / `stock_cash_flow_sheet_by_report_em`（akshare.akfamily.xyz），本机实测天齐锂业字段：`REPORT_DATE`、`NOTICE_DATE`、`OPERATE_INCOME`、`PARENT_NETPROFIT`、`DEDUCT_PARENT_NETPROFIT`、`OPERATE_COST`、`RESEARCH_EXPENSE`、`TOTAL_ASSETS`、`TOTAL_LIABILITIES`、`TOTAL_PARENT_EQUITY`、`MONETARYFUNDS`、`ACCOUNTS_RECE`、`INVENTORY`、`NETCASH_OPERATE`。只用这个库，不复制其源码；依赖固定在 `requirements.txt`。
+- 通用机制：工具定义与执行分离（沿用 Pi 风格的 `ToolDefinition` 注册表），第三方失败转成受控 `ToolError`，不外泄堆栈。
+- 本项目选择：由程序在首份资料通读后自动调用一次，不放进模型工具列表——数据只属于本次研究主公司（底稿不区分公司），也避免改变工具定义导致前缀缓存失效。按 `NOTICE_DATE` 过滤到研究截止日；按“证券+日期”缓存原始行（`storage/documents/financial-db/`，不提交）。同一指标有结构化数时直接用它；没有（失败、北交所、研发投入等）才用年报原文取数。
+- 局限（写入报告）：数据库可能是后续更正/重述后的数值；产能、产销、客户集中度、分业务收入不在三大报表里。
+- 引用：`check_citation` 只核对来源是否本次取得并读完；`loosen_page` 把对不上的页码去掉、保留来源，用于正文、定性图、数据表、分节写作和报告追问。不存在或未读完的来源仍不通过。表格数字无页码时 `check_table` 在整份资料或结构化数值内核对，核对不上的格子照旧标 `*`，不删表。

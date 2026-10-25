@@ -29,8 +29,10 @@ export function FinancialCharts({ data, sources, chartIds, showDataLabels = true
   function citation(row: FinancialRow, key: string) {
     const evidence = row.evidence[key]
     const source = sources.find((s) => s.sourceId === evidence?.sourceId)
-    return source && evidence ? <a href={`${source.url}#page=${evidence.page}`} target="_blank" rel="noreferrer"
-      title={`${source.title} PDF第${evidence.page}页：原值 ${evidence.rawValue}${evidence.unit}`} aria-label={`${row.periodLabel}${data.labels[key]}来源第${evidence.page}页`}>↗</a> : null
+    if (!source || !evidence) return null
+    const where = evidence.page == null ? '' : ` PDF第${evidence.page}页`
+    return <a href={evidence.page == null ? source.url : `${source.url}#page=${evidence.page}`} target="_blank" rel="noreferrer"
+      title={`${source.title}${where}：原值 ${evidence.rawValue}${evidence.unit}`} aria-label={`${row.periodLabel}${data.labels[key]}来源：${source.title}${where}`}>↗</a>
   }
   return <section className={`financial-section${chartIds ? ' section-figures' : ''}`} id={chartIds ? undefined : 'financial-analysis'} aria-label="财务表图">
     {!chartIds && <div className="report-section-heading"><div><span className="report-kicker">FINANCIAL OVERVIEW</span><h3 id="financial-heading">经营数据与同比趋势</h3></div><span>金额 · 亿元</span></div>}

@@ -225,9 +225,11 @@ class DiscussionRunner(AgentRunner):
     def validate_answer(self, assistant, *, final=False):
         answer = FollowupAnswer.model_validate_json(assistant.get("content") or "")
         citations = answer.citations + [c for edit in answer.section_edits for c in edit.citations]
+        for citation in citations:  # 页码不作为通过条件，对不上只去掉页码
+            citation.page = self.loosen_page(citation.source_id, citation.page)[0]
         invalid = [c.model_dump(by_alias=True) for c in citations if not self.safe_citation(c)]
         if invalid:
-            raise ValueError("以下引用不合格（未读/页码无效/网页日期未知或过截止日），请移除相应事实或补证，不要重复提交：" + json.dumps(invalid, ensure_ascii=False))
+            raise ValueError("以下引用不合格（未读完/网页日期未知或过截止日），请移除相应事实或补证，不要重复提交：" + json.dumps(invalid, ensure_ascii=False))
         if self.wants_supplement():
             eligible = self.eligible_supplement()
             if not eligible and not final:

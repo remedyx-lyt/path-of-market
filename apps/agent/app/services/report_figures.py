@@ -93,12 +93,18 @@ def check_table(table, page_text):
 
     计算值（如利用率、占比、同比）在原页找不到属于正常情况，前端标为“未在原页找到”，不当作原文数据。
     """
-    checked, unmatched = 0, []
+    checked, unmatched, tokens = 0, [], {}
+
+    def values(sid, page):  # 无页码时是整份资料的文字，同一来源只解析一次
+        if (sid, page) not in tokens:
+            tokens[sid, page] = {Decimal(t) for t in number_tokens(page_text(sid, page))}
+        return tokens[sid, page]
+
     for r, row in enumerate(table["rows"]):
-        if row.get("page") is None and not page_text(row["sourceId"], None):  # 网页可核对完整快照；行情无原文不计入核对
+        if row.get("page") is None and not page_text(row["sourceId"], None):  # 行情无原文不计入核对；PDF/网页/结构化报表按全文核对
             continue
         cited = [(row["sourceId"], row["page"])] + [(c["sourceId"], c.get("page")) for c in row.get("alsoFrom") or []]
-        page_values = {Decimal(t) for sid, page in cited for t in number_tokens(page_text(sid, page))}
+        page_values = set().union(*(values(sid, page) for sid, page in cited))
         for c, cell in enumerate(row["cells"]):
             numbers = NUMBER.findall(cell)
             if not numbers:
