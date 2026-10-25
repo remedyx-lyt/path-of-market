@@ -1,5 +1,7 @@
 # 任务板
 
+2026-10-25本轮：M2-7已接入；用户追加F8年报五年/远古十年与紫金、天齐真实验收。146项Python全量与32项隔离HTTP回归通过；紫金当前继续补齐完整资料，天齐随后运行，尚不宣称双案例完成。实测修复与范围见[f8-history-window.md](f8-history-window.md)。
+
 更新时间：2026-10-25（Australia/Sydney）。本轮M2-2单用户记忆接入，见[交接](m2-2-user-memory.md)；此前[M2-5摘要](m2-5-context-compaction.md)与[稳定性审查](reliability-review-2026-10-24.md)保留。代码/离线通过与真实模型验收分开记录。
 
 ## 当前准备工作

@@ -71,7 +71,7 @@ function AgentReportView({ report }: { report: AgentResearchReport }) {
         <div><dt>执行情况</dt><dd>{report.run.modelCalls} 次模型调用 · {report.run.steps} 轮决策 · {report.run.stopReason}</dd></div>
         <div><dt>模型用量</dt><dd>{usageText(report.run.usage)}</dd></div>
         <div><dt>资料阅读</dt><dd>{report.coverage.map((entry) => <p key={entry.sourceId}>
-          {report.sources.find((s) => s.sourceId === entry.sourceId)?.title}：{entry.unit === 'segment' ? `${entry.processedCharacters}/${entry.fetchedCharacters ?? '?'} 字网页正文` : `${entry.processedPages.length}/${entry.pageCount} 页文本`}
+          {report.sources.find((s) => s.sourceId === entry.sourceId)?.title}：{entry.unit === 'segment' ? `${entry.processedCharacters}/${entry.fetchedCharacters ?? '?'} 字网页正文` : `${entry.processedPages.length}/${entry.pageCount} 页已处理`}
           {entry.textComplete ? '，文本阅读完成' : entry.readingComplete ? `，阅读完成（${entry.emptyTextPages.length}页无文本内容已视觉补读）` : '，尚有未完成范围'}
         </p>)}</dd></div>
         <div><dt>工具动作</dt><dd><ol>{report.toolCalls.map((call) => <li key={call.toolCallId}>{labels[call.name] || call.name} · {call.status}{call.errorCode ? ` (${call.errorCode})` : ''}</li>)}</ol></dd></div>
