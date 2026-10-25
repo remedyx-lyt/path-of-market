@@ -132,6 +132,8 @@ class PublicWebTests(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         item = json.loads(path.read_text(encoding="utf-8"))
         item["text"] += "changed"
         path.write_text(json.dumps(item), encoding="utf-8")
+        archive = path.with_name(f"{sid}.{runner.coverage[sid]['snapshotSha256']}.json")
+        archive.write_text(json.dumps(item), encoding="utf-8")
         with self.assertRaises(ToolError):
             await runner.dispatch("read_web_document", {"sourceId": sid, "mode": "search", "query": "正文"})
 
@@ -179,6 +181,17 @@ class PublicWebTests(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job.status, "completed", job.error)
         self.assertEqual(job.report["sources"][0]["kind"], "web")
         self.assertTrue(job.report["coverage"][0]["textComplete"])
+
+    async def test_new_discovery_refreshes_while_old_snapshot_stays_readable(self):
+        service = self.service(body="原网页收入100亿元。")
+        result = await service.search(PublicSearchArguments(query="原网页", numResults=8), "2026-10-23")
+        first = await service.fetch(result["results"][0])
+        second_server = make_server(body="更新网页收入200亿元。")
+        service.gateway.fetch_server = second_server
+        later = {**result["results"][0], "discoveredAt": "later-discovery"}
+        second = await service.fetch(later)
+        self.assertNotEqual(first["sha256"], second["sha256"])
+        self.assertEqual(service.load(later["sourceId"], first["sha256"])["text"], first["text"])
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from app.core.config import ModelServiceError
 from app.schemas.agent import AgentReadArguments, ReadingNote
 from app.services.model_json import DerivedCache, ask_json, stable_key, validation_problems
 from app.services.runtime import now
+from app.services.reading_coverage import reading_complete, update_reading_complete
 from app.tools.contracts import ToolError
 
 # 阅读笔记的提示版本；修改 READ_SYSTEM 或阅读任务结构时递增，使旧缓存自然失效。
@@ -55,7 +56,7 @@ class ReadingMixin:
         identifier = self.source(downloaded["document"])
         if args.mode != "full":
             return await self.lookup(identifier, args)
-        if self.coverage[identifier]["textComplete"]:
+        if reading_complete(self.coverage[identifier]):
             # 已通读的资料再次 full：笔记此前已返回过，不重复整批传回主上下文（重复传回只增加 token）。
             await self.financial_summary(identifier)
             await self.detail_data(identifier)
@@ -68,19 +69,21 @@ class ReadingMixin:
                 "instruction": "此资料已完整阅读，阅读要点在之前的工具结果中；需要细节请用 mode=page（可一次多页）或 search。",
             }
         await self.read_all_batches(identifier, metadata, downloaded["document"]["sha256"])
+        await self.read_scanned_pages(identifier)
         await self.financial_summary(identifier)
         await self.detail_data(identifier)
         return {
             "sourceId": identifier,
             "notes": self.notes[identifier],
             "coverage": self.coverage[identifier],
+            "visualNotes": [o for r in self.visual_readings if r['sourceId'] == identifier for o in r['observations']],
             "financialData": self.financial_data(),
             "businessData": self.business_data(),
             "limitations": ["文字与视觉覆盖分别记录；未列出的图片尚未理解。"],
         }
 
     async def lookup(self, identifier, args):
-        if not self.coverage[identifier]["textComplete"]:
+        if not reading_complete(self.coverage[identifier]):
             raise ToolError(
                 "FULL_READ_REQUIRED", "此资料尚未完成通读。请使用 mode=full，程序会从上次成功处理的位置接续；单页或关键词不能替代。"
             )
@@ -165,12 +168,31 @@ class ReadingMixin:
             progress["textComplete"] = (
                 cursor is None and len(progress["processedPages"]) == progress["pageCount"] and not progress["emptyTextPages"]
             )
+            update_reading_complete(progress)
             self.job.emit(
                 "reading_processed",
                 f"{metadata['title']}：已处理 {len(progress['processedPages'])}/{progress['pageCount']} 页文本",
                 sourceId=identifier,
             )
             self.checkpoint()
+
+    async def read_scanned_pages(self, identifier):
+        progress = self.coverage[identifier]
+        missing = sorted(set(progress['emptyTextPages']) - set(progress.get('visuallyProcessedPages', [])))
+        if not missing:
+            update_reading_complete(progress)
+            return
+        if self.settings.model not in self.settings.vision_models:
+            self.job.emit('visual_gap', '存在无文本页，当前模型未声明视觉能力，未冒充通读完成', sourceId=identifier, pages=missing)
+            return
+        for page in missing:
+            self.check_budget()
+            self.job.emit('scan_reading', f'自动视觉阅读无文本页：PDF第{page}页', sourceId=identifier, pages=[page])
+            await self.inspect({'documentId': identifier, 'pages': [page],
+                                'focus': '通读整页扫描/图片内容。记录审计意见、重要声明、表头年份单位、关键数字与限制；空白页明确说明空白。不能只看财务关键词，不清楚的内容写uncertainties，不猜数字。'},
+                               origin='automatic_scan_reading')
+        update_reading_complete(progress)
+        self.checkpoint()
 
     async def batch_note(self, identifier, metadata, batch, cursor, file_sha256, cache):
         """一批原文交给模型阅读。笔记与研究问题无关（通读要点），同一文件换问题也能复用，避免整本重读。"""

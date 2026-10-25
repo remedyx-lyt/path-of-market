@@ -55,7 +55,7 @@ class WebMixin:
                 raise ToolError("FULL_READ_REQUIRED", "该网页尚未通读，请用full从已保存位置继续。")
             if not args.query.strip():
                 raise ToolError("INVALID_TOOL_ARGUMENTS", "原文回查需要query。")
-            snapshot = self.tools.public_web.load(args.source_id)
+            snapshot = self.tools.public_web.load(args.source_id, progress.get("snapshotSha256"))
             if snapshot is None or snapshot["sha256"] != progress.get("snapshotSha256"):
                 raise ToolError("WEB_CACHE_INVALID", "当前分支的网页原文快照不存在或已改变，不能冒充原证据。")
             positions, start = [], 0
@@ -68,7 +68,10 @@ class WebMixin:
                     "notesAlreadyProvided": True, "noteBatches": len(self.notes.get(args.source_id, []))}
         self.check_budget()
         self.job.emit("mcp_fetch_started", "通过MCP获取选定网页全文", sourceId=args.source_id, server="fetch", remoteTool="fetch")
-        snapshot = await self.tools.public_web.fetch(item)
+        snapshot = (self.tools.public_web.load(args.source_id, progress["snapshotSha256"])
+                    if progress.get("snapshotSha256") else await self.tools.public_web.fetch(item))
+        if snapshot is None:
+            raise ToolError("WEB_CACHE_INVALID", "本分支已读快照缺失，不能用新网页冒充旧阅读。")
         progress.update(fetchComplete=snapshot["fetchComplete"], fetchedCharacters=len(snapshot["text"]),
                         pageCount=ceil(len(snapshot["text"])/CHUNK_SIZE), fetchedAt=snapshot["retrievedAt"])
         self.sources[args.source_id].update(retrievedAt=snapshot["retrievedAt"], extractedTextOnly=True)

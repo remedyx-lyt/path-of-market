@@ -219,13 +219,21 @@ class PublicWeb:
             raise ToolError("INVALID_SOURCE_ID", "网页来源标识无效。")
         return self.root / (sid + ".json")
 
-    def load(self, sid):
+    def load(self, sid, snapshot_sha=None):
         path = self.path(sid)
+        if snapshot_sha is not None:
+            if not re.fullmatch(r"[a-f0-9]{64}", snapshot_sha):
+                raise ToolError("WEB_CACHE_INVALID", "网页快照标识无效。")
+            archived = path.with_name(f"{sid}.{snapshot_sha}.json")
+            if archived.exists():
+                path = archived
         if not path.exists():
             return None
         try:
             item = json.loads(path.read_text(encoding="utf-8"))
             if identifier(item["url"]) != sid or sha256(item["text"].encode()).hexdigest() != item["sha256"]:
+                raise ValueError
+            if snapshot_sha is not None and item["sha256"] != snapshot_sha:
                 raise ValueError
             return item
         except (OSError, ValueError, KeyError, TypeError):
@@ -234,12 +242,20 @@ class PublicWeb:
     def save(self, item):
         item["sha256"] = sha256(item["text"].encode()).hexdigest()
         write_json(self.path(item["sourceId"]), item)
+        if item.get("fetchComplete"):
+            archive = self.path(item["sourceId"]).with_name(f"{item['sourceId']}.{item['sha256']}.json")
+            if not archive.exists():
+                write_json(archive, item)
 
     async def fetch(self, discovered):
         sid, url = discovered["sourceId"], public_url(discovered["url"])
         if urlsplit(url).path.lower().endswith(".pdf"):
             raise ToolError("PDF_REQUIRES_DOCUMENT_TOOL", "此链接为PDF，请使用find_documents/read_document读取官方完整报告；不能把搜索摘要当全文。")
-        item = self.load(sid) or {**discovered, "text": "", "fetchComplete": False, "retrievedAt": utc_now(), "fetchCursor": 0}
+        cached = self.load(sid)
+        # 新研究/新搜索再次选中同URL时重新取网页，不能永远拿第一次内容当最新；老分支按hash读不可变快照。
+        if cached and cached.get("discoveredAt") != discovered.get("discoveredAt"):
+            cached = None
+        item = cached or {**discovered, "text": "", "fetchComplete": False, "retrievedAt": utc_now(), "fetchCursor": 0}
         if item["fetchComplete"]:
             return item
         async with self.gateway.connect("fetch") as (client, schemas):

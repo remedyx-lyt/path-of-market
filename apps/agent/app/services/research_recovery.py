@@ -12,6 +12,7 @@ from urllib.request import urlopen
 
 from app.core.config import ModelServiceError
 from app.services.session_recorder import DEFAULT_URL
+from app.services.reading_coverage import reading_complete, update_reading_complete
 from app.tools.documents import write_json
 
 STATE_FIELDS = (
@@ -131,7 +132,7 @@ def legacy_recovery(entries, task_id, *, allow_completed=False):
     for sid, coverage in state["coverage"].items():
         if coverage.get("processedCharacters", 0) and not state["notes"].get(sid):
             raise recovery_error("已读覆盖缺少对应阅读笔记，不能冒充上下文已恢复。")
-        if coverage.get("textComplete"):
+        if reading_complete(coverage):
             state["financial_checked"].append(sid)
             state["detail_checked"].append(sid)
     return {
@@ -168,6 +169,16 @@ def restore_runner(runner, recovery):
             setattr(runner, name, deepcopy(recovery["state"][name]))
     for name in SET_FIELDS:
         setattr(runner, name, set(recovery["state"].get(name, [])))
+    # 兼容已有视觉记录：原页确实查看过的证据可恢复，绝不把下载/渲染本身当成看过。
+    for record in runner.visual_readings:
+        if progress := runner.coverage.get(record['sourceId']):
+            before = reading_complete(progress)
+            progress['visuallyProcessedPages'] = sorted(set(progress.get('visuallyProcessedPages', [])) | {o['page'] for o in record['observations']})
+            update_reading_complete(progress)
+            if not before and reading_complete(progress):
+                runner.financial_checked.discard(record['sourceId'])
+                runner.detail_checked.discard(record['sourceId'])
+    runner.reconcile_saved_history()
     runner.job.sources = list(runner.sources.values())
     runner.job.coverage = list(runner.coverage.values())
     # 完整消息和证据继续使用；新一次尝试的调用/时间预算重新计量，旧用量留在旧报告及关联字段中。

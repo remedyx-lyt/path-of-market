@@ -34,7 +34,7 @@ class RunLimits:
         """容量按明确资料范围扩展，写作预留、逐批缓存与断点规则不变；不是无限重试。"""
         extra = max(0, years-2)
         return replace(cls(), max_model_calls=144+32*extra, max_tokens=2_000_000+700_000*extra,
-                       max_seconds=1200+240*extra, max_steps=18+2*extra, max_visual_pages=max(12, years+4))
+                       max_seconds=1200+240*extra, max_steps=18+2*extra, max_visual_pages=max(12, years*16))
 
 
 class BudgetStop(Exception):

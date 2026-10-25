@@ -38,6 +38,7 @@ from app.tools.public_web import PublicSearchArguments, WebReadArguments
 from app.services.runner_report import ReportMixin, compact_financial, strip_quotes
 from app.services.runner_writing import WritingMixin
 from app.services.runtime import BudgetStop, RunLimits, now
+from app.services.reading_coverage import reading_complete
 from app.services.session_recorder import RecordedMessages
 from app.services.research_recovery import pending_calls, restore_runner, save_checkpoint
 from app.tools.contracts import FindArguments, ToolError
@@ -53,7 +54,7 @@ TOOL_SPECS = (
     ("read_web_document", "通过MCP获取已搜索到的网页完整正文并分批通读，保存游标/覆盖；full可接续，search只回查已通读原文。网页引用page=null；未知发布日期不能支持截止日事实。", WebReadArguments),
     ("recall_user_memory", "按公司名/关键词回查跨会话研究经历与已确认偏好；历史用户问题不是公司事实证据。", RecallUserMemoryArguments),
     ("remember_user_memory", "将本次用户表达的长期研究偏好存为待确认建议，必须附逐字用户原话；不能根据年报/模型回复推断画像或覆盖用户确认偏好。", RememberUserMemoryArguments),
-    ("recall_research_context", "回查本分支已保存的完整阅读笔记或报告正文。上下文整理后找回细节，不重新付费通读PDF。reading_notes用sourceId/batch，report_section用sectionIndex。", RecallArguments),
+    ("recall_research_context", "回查本分支完整文字/视觉阅读笔记或报告正文，不重新付费通读。reading_notes/visual_notes用sourceId/batch，report_section用sectionIndex。", RecallArguments),
     ("find_documents", "从公司/会计年度/截止日找官方完整报告，支持年报、半年报、一季报和三季报；不需要上传。", FindArguments),
     (
         "read_document",
@@ -169,6 +170,8 @@ class ToolView:
                 for n in data["notes"]
             ]
             data["contextProjection"] = "主循环为有限要点投影；完整批次记录保留，其他细节可按页回查。"
+        if data.get('visualNotes'):
+            data['visualNotes'] = [{**note, 'summary': note['summary'][:600]} for note in data['visualNotes']]
         projected = json.dumps(body, ensure_ascii=False)
         pages = page_texts(data)
         long_pages = [p for p in pages if len(p["text"]) > 700]
@@ -450,7 +453,8 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
             messages += [{"role": "user", "content": json.dumps(memory, ensure_ascii=False)}]
         # 机器保存的来源/覆盖/计划不交给摘要模型改写；每次请求都带准确索引。
         source_index = [{"sourceId": sid, "title": s["title"], "kind": s["kind"], "pageCount": s.get("pageCount"),
-                         "textComplete": self.coverage.get(sid, {}).get("textComplete"), "noteBatches": len(self.notes.get(sid, [])),
+                         "textComplete": self.coverage.get(sid, {}).get("textComplete"), "readingComplete": reading_complete(self.coverage.get(sid)),
+                         "noteBatches": len(self.notes.get(sid, [])), "visualNoteBatches": sum(r['sourceId'] == sid for r in self.visual_readings),
                          "publishedAt": s.get("publishedAt"), "citationEligible": s.get("citationEligible", True),
                          "coverageUnit": self.coverage.get(sid, {}).get("unit", "page")}
                         for sid, s in self.sources.items()]
@@ -562,7 +566,7 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
             prior = self.action_counts.get(signature, 0)
             self.action_counts[signature] = prior + 1
             # full 允许带覆盖进展的接续；其他同参动作反复执行不增加证据。
-            if prior >= 2 and not (name == "read_document" and arguments.get("mode", "full") == "full"):
+            if prior >= 2 and not (name in {"read_document", "read_web_document"} and arguments.get("mode", "full") == "full"):
                 raise ToolError("REPEATED_ACTION", "同一动作已多次返回，请使用已有结果或改查，避免重复循环。")
             record["arguments"] = arguments
             result = {"status": "completed", "data": await self.dispatch(name, arguments)}
@@ -768,7 +772,7 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
                 await self.persist_outcome()
 
     def can_budget_finish(self):
-        return bool(self.coverage) and all(c["textComplete"] for c in self.coverage.values()) and (
+        return bool(self.coverage) and all(reading_complete(c) for c in self.coverage.values()) and (
             not self.job.request.include_market or self.market_data is not None
         ) and (not self.job.request.include_current_period or self.current_period_checked)
 

@@ -43,6 +43,7 @@ export const coverageSchema = z.object({
   sourceId: str, pageCount: int, processedPages: z.array(int), textComplete: z.boolean(),
   processedCharacters: finite, batches: int, emptyTextPages: z.array(z.unknown()),
   unit: z.enum(['page', 'segment']).optional(), fetchComplete: z.boolean().optional(), fetchedCharacters: finite.optional(),
+  readingComplete: z.boolean().optional(), visuallyProcessedPages: z.array(int.positive()).optional(),
 })
 
 const citation = z.object({ sourceId: str, page: int.nullish() })

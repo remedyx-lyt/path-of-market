@@ -32,7 +32,7 @@ class ContextSummary(BaseModel):
 
 class RecallArguments(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
-    kind: Literal["reading_notes", "report_section"]
+    kind: Literal["reading_notes", "visual_notes", "report_section"]
     source_id: str = Field(default="", alias="sourceId", max_length=80)
     batch: int = Field(default=0, ge=0, strict=True, description="reading_notes的批次序号，从0起；每次返回一批完整记录")
     section_index: int = Field(default=0, alias="sectionIndex", ge=0, le=11, strict=True)
@@ -116,6 +116,13 @@ class CompactionMixin:
 
     async def recall_research_context(self, arguments):
         args = RecallArguments.model_validate(arguments)
+        if args.kind == 'visual_notes':
+            records = [r for r in self.visual_readings if r['sourceId'] == args.source_id]
+            if args.batch >= len(records):
+                raise ToolError('CONTEXT_NOT_AVAILABLE', '本分支没有此批视觉阅读记录。')
+            record = records[args.batch]
+            return {'sourceId': args.source_id, 'batch': args.batch, 'batchCount': len(records), 'pages': record['pages'],
+                    'observations': deepcopy(record['observations']), 'origin': 'saved_visual_reading'}
         if args.kind == "reading_notes":
             if args.source_id not in self.sources or args.source_id not in self.notes:
                 raise ToolError("CONTEXT_NOT_AVAILABLE", "本分支没有该来源的已读记录，请使用来源目录中的sourceId。")

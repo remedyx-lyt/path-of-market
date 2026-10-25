@@ -12,6 +12,7 @@ from app.schemas.agent import AgentContent, Citation, SectionTable
 from app.services.model_json import escape_inner_quotes
 from app.services.report_figures import check_table, dominant_share, plan_section_figures
 from app.services.runtime import now
+from app.services.reading_coverage import reading_complete, page_read
 from app.tools.documents import write_json
 
 BASIC_TOPICS = {"business", "performance", "profitability", "cashflow", "balance_sheet", "research", "risks"}
@@ -251,7 +252,7 @@ class ReportMixin:
         return source is not None and (
             source["kind"] != "document"
             or citation.page is not None
-            and citation.page in self.coverage[citation.source_id]["processedPages"]
+            and page_read(self.coverage.get(citation.source_id), citation.page)
         )
 
     def require_evidence(self, ok, retry_message, gap):
@@ -299,7 +300,7 @@ class ReportMixin:
         self.require_evidence(not self.job.request.include_financials or self.annual_context()["count"] <= 2 or self.history_checked,
                               "尚未完成主公司的五/十年完整年报范围查询，请先find_documents。",
                               "未完成主公司的五/十年完整年报范围查询。")
-        unread = [c for c in self.coverage.values() if not c["textComplete"]]
+        unread = [c for c in self.coverage.values() if not reading_complete(c)]
         self.require_evidence(
             self.coverage and not unread,
             "选定报告尚未完整处理可提取文字，请继续 full 阅读或明确停止缺口",
@@ -314,12 +315,12 @@ class ReportMixin:
             "未查找截止年度最新已披露的定期报告。",
         )
         current = self.required_current
-        unread_annual = [d for sid, d in self.required_annual.items() if not self.coverage.get(sid, {}).get("textComplete")]
+        unread_annual = [d for sid, d in self.required_annual.items() if not reading_complete(self.coverage.get(sid))]
         self.require_evidence(not unread_annual,
                               "本次年报范围尚未完成，请full通读：" + "、".join(d["documentId"] for d in unread_annual),
                               "本次年报范围未读完：" + "、".join(d["title"] for d in unread_annual))
         self.require_evidence(
-            not current or self.coverage.get(current["documentId"], {}).get("textComplete"),
+            not current or reading_complete(self.coverage.get(current["documentId"])),
             f"当年最新已披露报告尚未通读，请以 mode=full 阅读 {current['documentId']}：{current['title']}" if current else "",
             f"当年最新已披露报告未通读：{current['title']}" if current else "",
         )
@@ -377,6 +378,8 @@ class ReportMixin:
                     "processedPageCount": len(c["processedPages"]),
                     "emptyTextPages": c["emptyTextPages"],
                     "textComplete": c["textComplete"],
+                    "readingComplete": reading_complete(c),
+                    "visuallyProcessedPages": c.get("visuallyProcessedPages", []),
                 }
                 for c in self.coverage.values()
             ],

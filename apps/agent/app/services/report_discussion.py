@@ -16,6 +16,7 @@ from app.schemas.discussion import FollowupAnswer
 from app.services.agent_runner import AgentRunner
 from app.services.research_recovery import checkpoint_path, legacy_recovery, load_recovery, pending_calls, recovery_error
 from app.services.runtime import BudgetStop, RunLimits, now
+from app.services.reading_coverage import reading_complete
 from app.services.session_recorder import DEFAULT_URL, RecordedMessages, SessionRecorder
 
 logger = logging.getLogger("path_of_market.discussion")
@@ -129,7 +130,7 @@ class DiscussionRunner(AgentRunner):
             raise ValueError("章节序号重复或越界")
         if len(self.base["sections"]) == 12 and 12 in indices:
             raise ValueError("报告已有12节，请修改现有章节而非新增")
-        if (answer.section_edits or answer.summary is not None) and any(not c.get("textComplete") for c in self.coverage.values()):
+        if (answer.section_edits or answer.summary is not None) and any(not reading_complete(c) for c in self.coverage.values()):
             raise ValueError("新选资料尚未完整阅读；请继续full阅读，或只回复未完成范围并将修改置空")
         return answer
 
@@ -204,7 +205,7 @@ class DiscussionRunner(AgentRunner):
                         self.messages.append({"role": "user", "content": "请修正回复：" + str(error)[:1600]})
                 if answer is None:
                     raise ModelServiceError("MODEL_INVALID_RESPONSE", "对话回复未通过校验，原报告保留。", 502)
-                unread = [self.sources[sid]["title"] for sid, coverage in self.coverage.items() if not coverage.get("textComplete")]
+                unread = [self.sources[sid]["title"] for sid, coverage in self.coverage.items() if not reading_complete(coverage)]
                 if unread:
                     answer.answer += "\n\n【未完成资料】以下新选资料仍未完整阅读：" + "、".join(unread) + "。相关补查未完成，不作为完整研究结论。"
                 self.job.followup = {"answer": answer.answer, "citations": [c.model_dump(by_alias=True) for c in answer.citations]}

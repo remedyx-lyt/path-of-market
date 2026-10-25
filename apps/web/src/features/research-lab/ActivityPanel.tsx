@@ -21,6 +21,7 @@ for (const type of ['memory_loaded', 'memory_disabled', 'memory_unavailable', 'm
 for (const type of ['mcp_search_started', 'mcp_search_finished', 'mcp_fetch_started', 'mcp_fetch_finished']) NOTES.add(type)
 for (const type of ['annual_history_lookup', 'annual_history_found']) NOTES.add(type)
 NOTES.add('annual_history_recheck_failed')
+NOTES.add('scan_reading')
 
 type Item =
   | { kind: 'phase'; id: string; text: string }

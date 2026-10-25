@@ -16,6 +16,7 @@ from app.services.financial_data import build_financial_data, locate_summary_pag
 from app.services.model_json import DerivedCache, ask_json, stable_key
 from app.services.report_figures import build_business_data, locate_detail_pages, locate_operating_pages, verified_segments
 from app.services.runtime import now
+from app.services.reading_coverage import reading_complete, update_reading_complete
 from app.tools.contracts import ToolError
 from app.tools.documents import write_json
 
@@ -81,7 +82,7 @@ class EvidenceMixin:
         if self.sources.get(identifier, {}).get("kind") == "web":
             progress = self.coverage.get(identifier, {})
             if page is None and progress.get("textComplete"):
-                snapshot = self.tools.public_web.load(identifier)
+                snapshot = self.tools.public_web.load(identifier, progress.get("snapshotSha256"))
                 if snapshot and snapshot["sha256"] == progress.get("snapshotSha256"):
                     return snapshot["text"]
             return ""
@@ -95,12 +96,12 @@ class EvidenceMixin:
         return {
             sid: pages
             for sid, c in self.coverage.items()
-            if c["textComplete"] and self.sources.get(sid, {}).get("kind") == "document" and (pages := locate_operating_pages(self.document_pages(sid)))
+            if reading_complete(c) and self.sources.get(sid, {}).get("kind") == "document" and (pages := locate_operating_pages(self.document_pages(sid)))
         }
 
     async def extract(self, arguments, *, origin="model_tool"):
         args = ExtractArguments.model_validate(arguments)
-        if not self.coverage.get(args.document_id, {}).get("textComplete"):
+        if not reading_complete(self.coverage.get(args.document_id)):
             raise ToolError("FULL_READING_REQUIRED", "先完整阅读资料，再回查取数；指定页提取不能代替全文阅读。")
         metadata, pages = await asyncio.to_thread(self.tools.store.loaded, args.document_id)
         if metadata["publishedAt"] > self.job.request.as_of_date.isoformat():
@@ -246,6 +247,13 @@ class EvidenceMixin:
             "imageHashes": [p["imageSha256"] for p in rendered["pages"]],
         }
         self.visual_readings.append(record)
+        progress = self.coverage[identifier]
+        was_complete = reading_complete(progress)
+        progress['visuallyProcessedPages'] = sorted(set(progress.get('visuallyProcessedPages', [])) | set(args.pages))
+        update_reading_complete(progress)
+        if not was_complete and reading_complete(progress):
+            self.financial_checked.discard(identifier)
+            self.detail_checked.discard(identifier)  # 原先因扫描页未读而失败的取数，补读后可继续。
         self.job.emit(
             "visual_processed",
             f"已查看 {metadata['title']} 原页 {args.pages}，核对{len(points)}个财务数值",
