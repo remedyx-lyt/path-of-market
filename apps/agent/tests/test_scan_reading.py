@@ -102,6 +102,7 @@ class ScanReadingTests(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(runner.writing_state)
         self.assertEqual(model.count('compose'), 0)
         self.assertIn('证据尚未就绪', runner.messages[-1]['content'])
+        self.assertEqual(runner.invalid_finals, 0)
 
     async def test_resume_defers_premature_draft_and_preserves_reading(self):
         model = VisualModel()

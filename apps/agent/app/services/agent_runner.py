@@ -509,9 +509,13 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
 
     async def finish(self, assistant):
         """模型未调用工具：ready 则进入写作，否则视为报告；通过核查返回 True，未通过则把问题回给模型。"""
+        if not self.context_wrapup and (gaps := self.pending_evidence()):
+            diagnostic = '证据尚未就绪，不开始写作。'+'；'.join(gaps)
+            self.job.emit('evidence_pending', diagnostic[:600])
+            self.messages.append({'role': 'user', 'content': diagnostic})
+            # 这是正常的取证反馈，不算“报告格式失败”；总轮次/时间/用量边界仍有效。
+            return False
         try:
-            if not self.context_wrapup and (gaps := self.pending_evidence()):
-                raise ValueError('证据尚未就绪，不开始写作。'+'；'.join(gaps))
             if wants_to_write(assistant.get("content")):
                 assistant = await self.compose()
             tables_done = self.report_stage == "tables"
@@ -717,7 +721,7 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
                         self.limits.max_context_characters - self.limits.context_reserve_characters
                     ):
                         self.start_context_wrapup()
-                    if self.context_wrapup and self.pending_evidence():
+                    if self.context_wrapup and self.pending_materials():
                         raise BudgetStop('context_budget_incomplete_evidence')
                     # 收尾写作：不再让模型选工具，用已取得的证据直接撰写（核查不通过时带着诊断再写）。
                     assistant = await self.compose() if self.context_wrapup else await self.model(messages, tool_specs=self.declarations())
