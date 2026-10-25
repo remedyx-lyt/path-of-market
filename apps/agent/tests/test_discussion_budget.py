@@ -7,8 +7,8 @@ from uuid import uuid4
 
 from support import RunnerFixture, SETTINGS, USAGE, DOC_ID, report, tool_call
 from app.schemas.discussion import FollowupRequest
-from app.services.discussion_context import report_view, select_history
-from app.services.report_discussion import DiscussionRunner
+from app.services.discussion_context import partial_answer, report_view, select_history
+from app.services.report_discussion import DiscussionRunner, SupplementRequired
 from app.services.research_jobs import ResearchJob
 from app.services.research_recovery import STATE_FIELDS, pending_calls, load_recovery
 from app.services.runtime import BudgetStop, RunLimits
@@ -200,6 +200,80 @@ class DiscussionBudget(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         result = await runner.recall_research_context({"kind": "report_section", "sectionIndex": 0})
         self.assertEqual(result["section"]["tables"], runner.base["sections"][0]["tables"])
         self.assertNotIn("HEAVY_MARKET", json.dumps(result))
+
+    def test_streaming_json_only_exposes_complete_answer_characters(self):
+        self.assertEqual(partial_answer('{"answer":"正在回答\\n下一段\\u4e2d'), '正在回答\n下一段中')
+        self.assertEqual(partial_answer('{"answer":"A\\u4e'), 'A')
+        self.assertEqual(partial_answer('{"answer":"A\\ud83d'), 'A')
+        self.assertEqual(partial_answer('{"answer":"A\\ud83d\\ude00"}'), 'A😀')
+        self.assertEqual(partial_answer('{"answer":"含\\"引号\\"和\\\\路径'), '含"引号"和\\路径')
+        self.assertEqual(partial_answer('先读取工具'), '')
+
+    async def test_old_supplement_does_not_count_as_this_turn_new_evidence(self):
+        _, runner = await self.make_discussion(message="再查一些公开资料，然后补充行业背景")
+        runner.discussion_source_baseline = [DOC_ID, WEB]
+        with self.assertRaises(SupplementRequired):
+            runner.validate_answer(response())
+        self.assertFalse(runner.eligible_supplement())
+        self.assertTrue(runner.validate_answer(response(), final=True))
+
+    async def test_missing_new_material_keeps_tools_available_instead_of_format_wrapup(self):
+        fresh = 'web-fresh-this-question'
+        calls = [tool_call(0, 0, 'read_web_document', {'sourceId': fresh})]
+        model = AsyncMock(side_effect=[(response(), USAGE), ({'role': 'assistant', 'content': None, 'tool_calls': calls}, USAGE),
+                                     (response([{'sourceId': fresh, 'page': None}]), USAGE)])
+        job, runner = await self.make_discussion(model, message="再查一些公开资料")
+        runner.discussion_source_baseline = [DOC_ID, WEB]
+        async def read(call):
+            runner.sources[fresh] = {**runner.sources[WEB], 'sourceId': fresh, 'title': '本次新报道'}
+            runner.coverage[fresh] = deepcopy(runner.coverage[WEB])
+            runner.notes[fresh] = deepcopy(runner.notes[WEB])
+            runner.messages.append({'role':'tool', 'tool_call_id':call['id'], 'content':'{"status":"completed"}'})
+        runner.run_tool_call = read
+        await self.run_local(runner)
+        self.assertEqual(job.status, 'completed', job.error)
+        self.assertIsNotNone(model.call_args_list[1].kwargs['tools'])
+        self.assertEqual(job.followup['citations'][0]['sourceId'], fresh)
+
+    async def test_final_without_fresh_evidence_explicitly_marks_supplement_incomplete(self):
+        job, runner = await self.make_discussion(message="再查公开资料")
+        runner.discussion_source_baseline = [DOC_ID, WEB]
+        runner.job.usage['total_tokens'] = 940000
+        await self.run_local(runner)
+        self.assertEqual(job.status, 'completed', job.error)
+        self.assertTrue(job.followup['answer'].startswith('【补查未完成】'))
+
+    async def test_streamed_draft_is_visible_then_removed_on_validation_failure(self):
+        observations = []
+        job, runner = await self.make_discussion()
+        async def stream(settings, messages, **options):
+            observations.append(job.followup)
+            options['on_text']('{"answer":"正在写的新资料补充')
+            self.assertTrue(job.snapshot()['followup']['draft'])
+            self.assertEqual(job.snapshot()['followup']['answer'], '正在写的新资料补充')
+            if len(observations) == 1:
+                return {'role':'assistant', 'content':'invalid-json'}, USAGE
+            return response(), USAGE
+        runner.completion = stream
+        await self.run_local(runner)
+        self.assertEqual(job.status, 'completed', job.error)
+        self.assertEqual(observations, [None, None])
+        self.assertNotIn('draft', job.followup)
+
+    async def test_repeated_missing_new_material_wraps_up_explicitly_instead_of_format_failure(self):
+        job, runner = await self.make_discussion(message="再查公开资料")
+        runner.discussion_source_baseline = [DOC_ID, WEB]
+        await self.run_local(runner)
+        self.assertEqual(job.status, 'completed', job.error)
+        self.assertTrue(job.followup['answer'].startswith('【补查未完成】'))
+        self.assertEqual(job.model_calls, 3)
+
+    async def test_questions_about_saved_material_or_no_search_do_not_force_new_research(self):
+        for message in ['不用再查，解释现金流', '不要搜索公开资料，只解释报告', '上次补查的资料是什么意思']:
+            _, runner = await self.make_discussion(message=message)
+            self.assertFalse(runner.wants_supplement(), message)
+        _, runner = await self.make_discussion(message='不要只看官网，再查一些行业资料')
+        self.assertTrue(runner.wants_supplement())
 
     def test_report_view_preserves_indices_and_content_without_changing_report(self):
         base = report()

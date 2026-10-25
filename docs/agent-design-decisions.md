@@ -191,6 +191,8 @@ Java `ResearchMemoryStore`保存在已忽略的`sessions/memory/user.json`，临
 
 ## 2026-10-25：报告研究与侧栏聊天的上下文边界
 
+工作台后续更新：沿用已核对的[DeepSeek流式输出](https://api-docs.deepseek.com/api/create-chat-completion)与项目既有`model_client._stream_payload`回调，不新增另一套工具循环。逐段仅展示JSON中answer字段完整字符，标为未校验草稿，失败撤回；最终格式/引用校验和JSONL追加仍是正式回复边界。新增本次来源基线随检查点保存，防止上一轮资料冒充再次补查。恢复同一问题沿用基线，新问题重新设置；机制适配与39项专项/34项隔离检查见[工作台交接](workbench-layout.md)。
+
 重新核对[Pi agent-loop](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent-loop.ts)：运行记录保留AgentMessage，调用边界才转换为模型输入；当前源码还提供prepareRequest/prepareNextTurn等准备点。采用的是“持久记录与每次输入分离”的机制，不宣称本项目直接运行了Pi。原有父链与完整工具请求/结果配对继续使用。
 
 实际适配：已完成报告是独立产物，聊天第一次进入时按可靠消息ID保留聊天父链，原研究流水、年报笔记、精确底稿另存可回查；报告投影只重复正文，不重复整份日线/表图/旧草稿。单独提供补查新笔记和日期资格；收尾只留未读搜索目录，避免摘要数字冒充新成果。用户要求补查且存在有效新资料时，回复至少引用新增来源；该检查证明实际阅读与引用关联，不等于自动证明所有文字事实。

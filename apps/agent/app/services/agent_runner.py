@@ -193,6 +193,7 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
         self.compaction_state = None
         self.compaction_count = 0
         self.discussion_context_version = 0
+        self.discussion_source_baseline = None
         self.compaction_attempts = 0
         self.compaction_failed_at = None
         self.user_memory = None

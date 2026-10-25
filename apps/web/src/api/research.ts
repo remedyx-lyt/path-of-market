@@ -100,6 +100,7 @@ export type ResearchJob = {
   parentTaskId?: string | null
   persistence?: { unsent: number; lastError?: string | null } | null
   events: JobEvent[]
+  followup?: { answer?: string; citations?: { sourceId: string; page?: number | null }[]; draft?: boolean; turnId?: string; versionId?: string | null } | null
   report: AgentResearchReport | null; error: { code: string; message: string } | null
 }
 export type ResearchActivity = Pick<ResearchJob, 'taskId' | 'status' | 'target' | 'progress' | 'modelCalls' | 'usage' | 'phase' | 'events' | 'parentTaskId'>

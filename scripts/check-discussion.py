@@ -95,6 +95,9 @@ def worker(port):
             answer["answer"] += "；实际确认偏好：" + json.dumps(profile["confirmedPreferences"], ensure_ascii=False)
         if query == "QA_BAD_CITATION" and not any("请修正回复" in str(m.get("content")) for m in messages):
             answer["citations"][0]["page"] = 999
+        if query == "QA_STREAM" and kwargs.get("on_text"):
+            kwargs["on_text"]('{"answer":"正在分段生成回答')
+            await asyncio.sleep(2)
         return {"role": "assistant", "content": json.dumps(answer, ensure_ascii=False)}, USAGE
 
     jobs.load_model_settings = lambda: SETTINGS
@@ -193,6 +196,24 @@ def main():
 
         first, first_turn, discussion = send("QA_FIRST")
         check("Java→Python异步追问完成并落盘", first["status"] == "completed" and first_turn["answer"] and len(discussion["versions"]) == 1)
+        status, streaming = bridge.request(base, prefix + "/chat", "POST", {
+            "message": "QA_STREAM", "action": "ask", "parentId": root, "requestId": str(uuid4())})
+        live_draft = None
+        for _ in range(30):
+            _, snapshot = bridge.request(base, f"/api/research/jobs/{streaming['taskId']}")
+            if (snapshot.get("followup") or {}).get("draft"):
+                live_draft = snapshot
+                break
+            time.sleep(.1)
+        check("Java→Python实际轮询可见尚未校验的流式回答", status == 202 and live_draft is not None
+              and live_draft['followup']['answer'] == '正在分段生成回答' and live_draft['status'] == 'running')
+        for _ in range(80):
+            _, finished_stream = bridge.request(base, f"/api/research/jobs/{streaming['taskId']}")
+            if finished_stream['status'] not in {'queued', 'running'} and not (finished_stream.get('persistence') or {}).get('unsent'):
+                break
+            time.sleep(.1)
+        check("流式草稿经最终校验后保存为正式对话", finished_stream['status'] == 'completed'
+              and not (finished_stream.get('followup') or {}).get('draft'))
         status, profile = bridge.request(base, "/api/research/memory", "POST", {"revision": bridge.request(base, "/api/research/memory")[1]["revision"],
             "action": "save", "text": "已确认：优先核对现金流", "category": "research_preference"})
         check("单用户偏好可通过Java保存", status == 200 and any(n["text"] == "已确认：优先核对现金流" for n in profile["notes"]))

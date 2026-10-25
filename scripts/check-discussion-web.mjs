@@ -18,6 +18,8 @@ try {
   const { ReportWorkbench } = await vite.ssrLoadModule('/src/features/research-lab/ReportWorkbench.tsx')
   const { ResearchPreview } = await vite.ssrLoadModule('/src/features/research-lab/ResearchPreview.tsx')
   const { ReportText } = await vite.ssrLoadModule('/src/features/research-lab/ReportText.tsx')
+  const { DiscussionMessages } = await vite.ssrLoadModule('/src/features/research-lab/DiscussionMessages.tsx')
+  const { clampChatWidth } = await vite.ssrLoadModule('/src/features/research-lab/panelLayout.ts')
   const { ActivityPanel, timeline } = await vite.ssrLoadModule('/src/features/research-lab/ActivityPanel.tsx')
   const methods = []
   globalThis.fetch = async (_url, options) => { methods.push(options?.method ?? 'GET'); return { ok: true, json: async () => fixture } }
@@ -26,7 +28,7 @@ try {
   assert.deepEqual(methods, ['GET'])
   for (const version of data.versions) {
     assert.ok(agentReportSchema.safeParse(version.report).success)
-    assert.match(renderToStaticMarkup(createElement(ReportWorkbench, { report: version.report })), /报告版本/)
+    assert.match(renderToStaticMarkup(createElement(ReportWorkbench, { report: version.report })), /id="report-version"/)
   }
   const follow = data.turns.find((t) => t.userMessage === 'QA_FOLLOW')
   assert.deepEqual(selectedTurns(data.turns, follow.id).map((t) => t.userMessage), ['QA_FIRST', 'QA_REVISE', 'QA_FOLLOW'])
@@ -36,6 +38,17 @@ try {
   const html = renderToStaticMarkup(createElement(ReportWorkbench, { report: data.versions[0].report }))
   assert.match(html, /报告对话/)
   assert.match(html, /report-version/)
+  assert.match(html, /收起报告/)
+  assert.match(html, /aria-label="放大文字"/)
+  const optimistic = renderToStaticMarkup(createElement(DiscussionMessages, { turns: [], report: data.versions[0].report,
+    pending: { message: '我刚刚发送的问题 <script>bad()</script>', action: 'ask', requestId: 'request-id', parentId: 'parent-id' },
+    progress: { followup: { draft: true, answer: '实际分段回答 <script>bad()</script>' }, modelCalls: 1, events: [], usage: {} }, busy: true, onRetry() {} }))
+  assert.match(optimistic, /我刚刚发送的问题/)
+  assert.match(optimistic, /实际分段回答/)
+  assert.match(optimistic, /内容尚未校验/)
+  assert.doesNotMatch(optimistic, /<script>/)
+  assert.equal(clampChatWidth(1800, 1000), 692)
+  assert.equal(clampChatWidth(100, 1000), 320)
   const preview = renderToStaticMarkup(createElement(ResearchPreview, { draft: null, report: data.versions[0].report,
     isGenerating: false, hasError: false, job: { taskId: data.versions[0].report.run.taskId,
       status: 'completed', startedAt: data.versions[0].report.run.startedAt,

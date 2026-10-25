@@ -1,5 +1,48 @@
 """报告是可回查的产物，不是每轮重放的研究流水；不删除原始会话或证据。"""
 import json
+import re
+
+
+def partial_answer(raw):
+    """只解码流式JSON中answer字段的完整字符，不把JSON/转义残片展示为答复。最终仍须完整校验。"""
+    match = re.search(r'(?<!\\)"answer"\s*:\s*"', raw)
+    if not match:
+        return ""
+    result, i = [], match.end()
+    escapes = {'n': '\n', 'r': '\r', 't': '\t', 'b': '\b', 'f': '\f', '"': '"', '\\': '\\', '/': '/'}
+    while i < len(raw) and len(result) < 16000:
+        char = raw[i]
+        if char == '"':
+            break
+        if char != '\\':
+            result.append(char)
+            i += 1
+            continue
+        if i + 1 >= len(raw):
+            break
+        escape = raw[i + 1]
+        if escape == 'u':
+            fragment = raw[i:i + 6]
+            if len(fragment) != 6:
+                break
+            try:
+                code = int(fragment[2:], 16)
+                if 0xD800 <= code <= 0xDBFF:
+                    fragment = raw[i:i + 12]
+                    if len(fragment) != 12 or fragment[6:8] != '\\u' or not 0xDC00 <= int(fragment[8:], 16) <= 0xDFFF:
+                        break
+                elif 0xDC00 <= code <= 0xDFFF:
+                    break
+                result.append(json.loads('"' + fragment + '"'))
+            except ValueError:
+                break
+            i += len(fragment)
+        elif escape in escapes:
+            result.append(escapes[escape])
+            i += 2
+        else:
+            break
+    return ''.join(result)
 
 
 def select_history(recovery, chain, prefix_length):
@@ -33,10 +76,12 @@ def saved_supplement(runner):
         if sid in original:
             continue
         notes = runner.notes.get(sid, [])
-        ineligible = source["kind"] == "web" and sid not in runner.eligible_supplement()
+        from app.schemas.agent import Citation
+        ineligible = source["kind"] == "web" and not runner.safe_citation(Citation(sourceId=sid, page=None))
         records.append({"sourceId": sid, "title": source["title"], "kind": source["kind"],
                         "publishedAt": source.get("publishedAt"), "citationEligible": source.get("citationEligible", True),
                         "noteBatches": len(notes), "notes": [] if ineligible else notes[:2],
+                        "newInThisFollowup": sid not in (runner.discussion_source_baseline or []),
                         "instruction": "日期/阅读条件不合格，仅列为待核资料，不能据此叙述数字或结论。" if ineligible else "完整笔记按批次回查。"})
     # 详细笔记仍可回查；不以无来源的再总结代替原笔记。
     kept, length = [], 0
@@ -48,7 +93,7 @@ def saved_supplement(runner):
         kept.append(record)
         length += len(json.dumps(record, ensure_ascii=False))
     return {"type": "discussion_supplement", "sources": list(reversed(kept)),
-            "instruction": "这些是本报告后补查的来源。回答要说明相对原报告增加/修正什么，并引用实际已读且日期合格的资料；不可把搜索摘要或未知日期网页当成已证实事实。"}
+            "instruction": "newInThisFollowup区分本次新读与此前对话资料。用户说再查时，旧资料不能冒充本次新增；回答说明增量并引用实际已读且日期合格的新资料。搜索摘要和未知日期网页不是已证实事实。"}
 
 
 def answer_history(messages, blocked_source_ids=()):

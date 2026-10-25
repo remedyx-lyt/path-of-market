@@ -214,6 +214,8 @@ export const jobSchema = z.object({
   events: z.array(z.object({ id: str, message: str, type: str })),
   coverage: z.array(coverageSchema),
   report: agentReportSchema.nullable(),
+  followup: z.object({ answer: z.string().optional(), draft: z.boolean().optional(), turnId: z.string().optional(),
+    versionId: z.string().nullish() }).nullish(),
 })
 
 /** 历史活动读取不依赖旧版报告的schema；只验证活动实际需要的字段。 */

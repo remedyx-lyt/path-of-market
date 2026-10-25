@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { generateReport, waitForAgent, cancelAgentJob, getAgentJob, continueAgentJob, ResearchApiError } from '../../api/research'
 import { ResearchPreview } from './ResearchPreview'
@@ -7,9 +7,11 @@ import { UserMemoryPanel } from './UserMemoryPanel'
 import { characterCount, normalizeDraft, OMENS, validateDraft } from './researchDraft'
 import type { DraftErrors } from './researchDraft'
 import { initialWorkspaceState, workspaceReducer } from './workspaceState'
+import { readPanelNumber, savePanelNumber } from './panelLayout'
 
 export function ResearchWorkspace() {
   const [state, dispatch] = useReducer(workspaceReducer, undefined, initialWorkspaceState)
+  const [inputOpen, setInputOpen] = useState(() => !!readPanelNumber('pm-input-open', 0, 0, 1))
   const { draft, questionEdited, preview, errors, message, report, mode, job, resumeId, asOfDate, requestError, isGenerating } = state
   const requestRef = useRef<AbortController | null>(null)
   const pendingFocusRef = useRef<DraftErrors | null>(null)
@@ -175,8 +177,13 @@ export function ResearchWorkspace() {
   }
 
   return (
-    <div className={`workspace-layout${report?.mode === 'agent' ? ' workspace-layout--report' : ''}`}>
-      <section className="research-input" aria-labelledby="workspace-title">
+    <div className={`workspace-layout${report?.mode === 'agent' ? ` workspace-layout--report${inputOpen ? ' is-input-open' : ' is-input-collapsed'}` : ''}`}>
+      {report?.mode === 'agent' && <div className="workspace-panel-toolbar">
+        <a className="workspace-brand" href="/" aria-label="市场之路首页">PM</a>
+        <button type="button" aria-expanded={inputOpen} aria-controls="research-settings" onClick={() => { setInputOpen(!inputOpen); savePanelNumber('pm-input-open', inputOpen ? 0 : 1) }}>{inputOpen ? '收起研究设置' : '展开研究设置'} <span aria-hidden="true">☰</span></button>
+        <strong>{report.target}<span>研究工作台</span></strong><span className="workspace-panel-hint">报告、对话可独立收起 · 拖动分隔线调整宽度</span>
+      </div>}
+      <section className="research-input" id="research-settings" hidden={report?.mode === 'agent' && !inputOpen} aria-labelledby="workspace-title">
         <div className="workspace-intro">
           <p className="eyebrow">深研室 <span>/</span> THE RESEARCH LAB</p>
           <h1 id="workspace-title">把问题，<br />研究清楚。</h1>
