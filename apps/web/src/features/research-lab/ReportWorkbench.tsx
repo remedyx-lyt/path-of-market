@@ -43,6 +43,7 @@ export function ReportWorkbench({ report }: { report: AgentResearchReport }) {
     try {
       const job = await pollFollowup(taskId, abort.signal, setProgress)
       const next = await refresh(abort.signal)
+      window.dispatchEvent(new Event('path-of-market-memory-changed'))
       const turn = next.turns.find((t) => t.runId === taskId)
       if (turn) {
         if (turn.status === 'pending' && !['queued', 'running'].includes(job.status)) {

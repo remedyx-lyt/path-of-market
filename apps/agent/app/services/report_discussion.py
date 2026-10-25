@@ -183,6 +183,7 @@ class DiscussionRunner(AgentRunner):
         answer, version_id = None, None
         try:
             async with asyncio.timeout(self.limits.max_seconds):
+                await self.load_user_memory()
                 for attempt in range(self.limits.max_steps + 3):
                     final = attempt >= self.limits.max_steps
                     assistant = await self.next_turn(final)

@@ -76,7 +76,11 @@ def worker(port):
         if query == "QA_TRANSIENT" and not state["transient"]:
             state["transient"] += 1
             raise ModelServiceError("MODEL_TIMEOUT", "隔离测试：临时超时", 504)
-        if query in {"QA_TOOL", "QA_RECALL"} and not any(m["role"] == "tool" for m in messages[latest + 1:]):
+        if query in {"QA_TOOL", "QA_RECALL", "QA_MEMORY_RECALL", "QA_MEMORY_REMEMBER"} and not any(m["role"] == "tool" for m in messages[latest + 1:]):
+            if query == "QA_MEMORY_RECALL":
+                return {"role": "assistant", "content": None, "tool_calls": [tool_call(3, 0, "recall_user_memory", {"query": "同花顺", "limit": 3})]}, USAGE
+            if query == "QA_MEMORY_REMEMBER":
+                return {"role": "assistant", "content": None, "tool_calls": [tool_call(4, 0, "remember_user_memory", {"text": "以后先解释现金流再给反方证据", "category": "research_preference", "quote": "以后先解释现金流再给反方证据"})]}, USAGE
             if query == "QA_RECALL":
                 return {"role": "assistant", "content": None, "tool_calls": [tool_call(2, 0, "recall_research_context", {"kind": "reading_notes", "sourceId": DOC_ID, "batch": 0})]}, USAGE
             return {"role": "assistant", "content": None, "tool_calls": [tool_call(1, 0, "read_document", {"documentId": DOC_ID, "mode": "page", "page": 1})]}, USAGE
@@ -86,6 +90,9 @@ def worker(port):
             edits = [{"index": 2 if query == "QA_APPEND" else 0, "heading": "新增补充" if query == "QA_APPEND" else "经营证据（修订）",
                       "content": "**更保守的判断。**\n\n经营与风险需要结合实际来源解释。", "citations": [{"sourceId": DOC_ID, "page": 1}]}]
         answer = {"answer": "当前分支的问题：" + " → ".join(queries), "citations": [{"sourceId": DOC_ID, "page": 1}], "sectionEdits": edits, "summary": None}
+        if query == "QA_MEMORY_CHECK":
+            profile = next(json.loads(m["content"]) for m in messages if m["role"] == "user" and isinstance(m.get("content"), str) and m["content"].startswith('{"type": "user_research_memory"'))
+            answer["answer"] += "；实际确认偏好：" + json.dumps(profile["confirmedPreferences"], ensure_ascii=False)
         if query == "QA_BAD_CITATION" and not any("请修正回复" in str(m.get("content")) for m in messages):
             answer["citations"][0]["page"] = 999
         return {"role": "assistant", "content": json.dumps(answer, ensure_ascii=False)}, USAGE
@@ -162,6 +169,8 @@ def main():
         agent = start_agent()
         process, base, log = bridge.start_java(java_port, provider_port)
         _, seed = bridge.request(provider_base, "/qa/seed", "POST", {})
+        # 独立旧研究用于验证跨会话回查；不能只从当前报告的另一分支取经历。
+        bridge.request(provider_base, "/qa/seed", "POST", {})
         task, root = seed["taskId"], seed["nodeId"]
         prefix = f"/api/research/jobs/{task}"
         _, original = bridge.request(base, prefix + "/discussion")
@@ -184,6 +193,16 @@ def main():
 
         first, first_turn, discussion = send("QA_FIRST")
         check("Java→Python异步追问完成并落盘", first["status"] == "completed" and first_turn["answer"] and len(discussion["versions"]) == 1)
+        status, profile = bridge.request(base, "/api/research/memory", "POST", {"revision": bridge.request(base, "/api/research/memory")[1]["revision"],
+            "action": "save", "text": "已确认：优先核对现金流", "category": "research_preference"})
+        check("单用户偏好可通过Java保存", status == 200 and any(n["text"] == "已确认：优先核对现金流" for n in profile["notes"]))
+        memory_job, memory_turn, _ = send("QA_MEMORY_CHECK")
+        check("真实模型调用输入带跨会话确认偏好，不只是界面存字段", memory_job["status"] == "completed" and "已确认：优先核对现金流" in memory_turn["answer"]
+            and any(e["type"] == "memory_loaded" for e in memory_job["events"]))
+        recalled_memory, _, _ = send("QA_MEMORY_RECALL")
+        check("模型可实际调用跨会话研究记忆回查工具", recalled_memory["status"] == "completed" and any(e["type"] == "tool_finished" and e.get("name") == "recall_user_memory" and e.get("status") == "completed" for e in recalled_memory["events"]))
+        remembered, _, _ = send("QA_MEMORY_REMEMBER 以后先解释现金流再给反方证据")
+        check("实际对话工具保存带本次原话的偏好候选", remembered["status"] == "completed" and any(n["status"] == "suggested" and n["quote"] == "以后先解释现金流再给反方证据" for n in bridge.request(base, "/api/research/memory")[1]["notes"]))
         revised, revised_turn, discussion = send("QA_REVISE", first_turn["id"], "revise")
         v2 = discussion["versions"][-1]
         check("局部修订另存V2，原报告逐字段不变", revised["status"] == "completed" and v2["reportVersion"] == 2 and discussion["versions"][0] == original["versions"][0])
@@ -250,6 +269,8 @@ def main():
         check("Java/Python重启后报告版本、对话与任务均可恢复查看", len(saved["versions"]) == 3 and restored["status"] == "completed" and restored["followup"]["answer"])
         restart_job, restart_turn, _ = send("QA_AFTER_RESTART", revised_turn["id"])
         check("重启后沿旧分支继续问，复用证据与历史", restart_job["status"] == "completed" and "QA_FIRST" in restart_turn["answer"] and "QA_SIBLING" not in restart_turn["answer"])
+        memory_after, memory_after_turn, _ = send("QA_MEMORY_CHECK")
+        check("双服务重启后新对话仍真正读取长期确认偏好", memory_after["status"] == "completed" and "已确认：优先核对现金流" in memory_after_turn["answer"])
         before = bridge.request(provider_base, "/qa/calls")[1]["calls"]
         status, _ = bridge.request(base, prefix + "/chat", "POST", body)
         check("重启后相同请求标识也不会重启收费调用", status == 409 and bridge.request(provider_base, "/qa/calls")[1]["calls"] == before)

@@ -17,6 +17,7 @@ const NOTES = new Set(['current_period_lookup', 'skill_read', 'data_extracted', 
 for (const type of ['methods_plan_invalid', 'reading_note_invalid', 'reading_batch_split', 'reading_batch_retry', 'reading_batch_failed']) NOTES.add(type)
 for (const type of ['run_resumed', 'budget_wrapup', 'checkpoint_failed', 'writing_unit_retry', 'writing_unit_failed']) NOTES.add(type)
 for (const type of ['compaction_started', 'compaction_completed', 'compaction_failed', 'compaction_skipped']) NOTES.add(type)
+for (const type of ['memory_loaded', 'memory_disabled', 'memory_unavailable', 'memory_suggested']) NOTES.add(type)
 
 type Item =
   | { kind: 'phase'; id: string; text: string }

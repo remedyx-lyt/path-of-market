@@ -12,11 +12,11 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 2026-10-24 晚补充：[调用预算与任务接续](docs/budget-and-continuation.md) 已接入。天齐旧任务读完686页后碰到72次上限；修复后新增7次调用完成正文、表格与复核，没有重读全文。未完成报告可点“从已保存进度继续”；查看与恢复轮询不会启动收费研究。随后新增 F17 大纲→逐节保存→摘要，失败只重试未完成部分，已通过隔离检查，未额外付费重生成同一报告。导出仍待做；聊天和上下文压缩见下方最新进展。
 
-按用户要求先补齐了财务研究 Skill、财务表图与局部 PDF 原页视觉，随后完成代码整理、token 优化与 M1-4。当前六个逻辑工具/八个底层工具；不选预兆也按研究问题选择原版 Skill，选了预兆再叠加专属方法与检查；16个 Anthropic 原版 Skill/36个文件按许可保留。相关原版方法完整交给模型形成可调整的研究计划，模型主动选择业务/财务/研发/风险图并嵌入相关章节；不机械按图数配额。见 [方法实际使用与按论点选图](docs/methods-and-section-figures.md) 和 [研究Skill与表图说明](docs/financial-research-skill.md)。
+按用户要求先补齐了财务研究 Skill、财务表图与局部 PDF 原页视觉，随后完成代码整理、token 优化与 M1-4。当前九个逻辑工具/八个底层公开数据工具（含本地研究记录、跨会话记忆回查和偏好建议）；不选预兆也按研究问题选择原版 Skill，选了预兆再叠加专属方法与检查；16个 Anthropic 原版 Skill/36个文件按许可保留。相关原版方法完整交给模型形成可调整的研究计划，模型主动选择业务/财务/研发/风险图并嵌入相关章节；不机械按图数配额。见 [方法实际使用与按论点选图](docs/methods-and-section-figures.md) 和 [研究Skill与表图说明](docs/financial-research-skill.md)。
 
 [查看已持久化的中际旭创案例](http://127.0.0.1:5173/?task=0c32562d-04e8-47ef-aea3-49885bd87486) 不会重新调用模型，服务重启后可从 JSONL 打开报告与过程记录。较早的 `921f4324` 案例产生于会话持久化前，原进程退出后链接可能失效，备份为 `storage/runs/section-figures-live.json` 和聊天工作区 `outputs/`。侧栏聊天基础版已接入（见M2-4说明）；未完成任务手动接续已接入，边界见上述说明。
 
-2026-10-25 最新：F9本地默认问题、M2-4报告侧边对话/版本和M2-5上下文压缩已接入。报告后连续追问接近程序上下文阈值时，较早历史自动整理为摘要，当前报告/最新问题/底稿及原始记录保留；可查看摘要、回查笔记并在重启后继续。27项隔离聊天集成通过，真实模型调用0次；真实DeepSeek摘要与对话质量待使用验收。学习入口见[M2-4说明](docs/m2-4-report-discussion.md)、[M2-5说明](docs/m2-5-context-compaction.md)。下一项为M2-2研究记忆。
+2026-10-25 最新：M2-2单用户研究记忆已接入。输入区下方可展开“研究记忆与偏好”，自动聚合成功研究的对象/问题与主题观察；确认偏好进入新研究的方法计划、正文及报告后追问，模型可提出带用户原话的待确认建议。可编辑、移除、关闭与回查，当前任务优先；持久记忆不提交Git。118项Python单测、20项记忆HTTP与32项聊天/压缩/恢复集成通过，本轮真实模型调用0次。学习入口见[M2-2说明](docs/m2-2-user-memory.md)、[M2-4说明](docs/m2-4-report-discussion.md)、[M2-5说明](docs/m2-5-context-compaction.md)。下一项M2-7通过MCP接公开搜索/网页读取；完成后再整理GitHub展示版README、架构、截图和改进计划，当前未创建远程仓库。
 
 ## 自动资料工具（M1-2）
 
@@ -123,8 +123,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.p
 - `AGENTS.md`、`docs/agent-design-decisions.md`：核心机制参考成熟实践、JSONL 会话方向、统一资料通读和学习交接。
 - `docs/m1-2-tools.md`：自动查年报、六个工具、连续全本阅读与验收。
 - `docs/m1-3-agent.md`：M1-3 当时的动态研究循环（三个逻辑工具/七个底层工具）、股票行情、真实案例与学习入口。
-- `docs/m1-4-omens.md`：代码整理、token 优化、Skill 选择与 M1-4 预兆策略（当前六个逻辑工具/八个底层工具）、验收命令。
-- `docs/financial-research-skill.md`：原版金融Skill、原页视觉、财务底稿/同比和图表（写作时五个逻辑工具，当前六个）。
+- `docs/m1-4-omens.md`：代码整理、token 优化、Skill 选择与 M1-4 预兆策略（该阶段六个逻辑工具/八个底层工具）、验收命令。
+- `docs/financial-research-skill.md`：原版金融Skill、原页视觉、财务底稿/同比和图表（该文档编写时五至六个逻辑工具）。
+- `docs/m2-2-user-memory.md`：单用户研究记忆、确认偏好/原话候选、工具/界面/验证及后续MCP和展示安排。
 - `docs/current-state.md`：当前进度（简要）；`docs/history.md`：此前的完整交付与验收记录。
 - `docs/task-board.md`：任务板。
 - `docs/dev-workflow.md`：AI 协作开发工作流。

@@ -34,6 +34,7 @@ import tools.jackson.databind.node.ObjectNode;
 @Component
 public class SessionStore {
     private static final Pattern UUID_PATTERN = Pattern.compile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
+    private static final Pattern MEMORY_TYPE = Pattern.compile("\"type\"\\s*:\\s*\"(session|run_state|chat_turn|followup)\"");
     private static final Set<String> TYPES = Set.of("session", "event", "message", "context_edit", "report", "run_state", "continuation", "report_draft", "followup", "chat_turn", "compaction");
 
     private final Path directory;
@@ -174,6 +175,61 @@ public class SessionStore {
         }
         sessions.sort(Comparator.comparing((ObjectNode s) -> s.path("createdAt").asString("")).reversed());
         return sessions.subList(0, Math.min(limit, sessions.size()));
+    }
+
+    /** 记忆只观察成功研究的用户问题与成功追问；报告正文/模型回复不能充当用户偏好的证据。 */
+    public List<ObjectNode> memoryInputs() {
+        List<ObjectNode> inputs = new ArrayList<>();
+        for (String sessionId : Set.copyOf(sessionByRun.values())) memoryEntries(sessionId).ifPresent(entries -> {
+            JsonNode header = entries.getFirst();
+            String root = header.path("runId").asString("");
+            boolean completed = entries.stream().anyMatch(e -> "run_state".equals(e.path("type").asString(""))
+                    && root.equals(e.path("runId").asString("")) && "completed".equals(e.path("status").asString("")));
+            if (completed) inputs.add(memoryInput(header, header.path("request").path("question").asString(""), "research",
+                    header.path("request").path("target").asString(""), root));
+            for (JsonNode entry : entries) if ("chat_turn".equals(entry.path("type").asString(""))
+                    && "completed".equals(entry.path("status").asString("")))
+                inputs.add(memoryInput(entry, entry.path("userMessage").asString(""), "followup",
+                        header.path("request").path("target").asString(""), root));
+        });
+        inputs.sort(Comparator.comparing((ObjectNode e) -> e.path("timestamp").asString("")).reversed());
+        return inputs;
+    }
+
+    private ObjectNode memoryInput(JsonNode entry, String question, String kind, String target, String root) {
+        ObjectNode item = mapper.createObjectNode();
+        item.put("runId", entry.path("runId").asString(""));
+        item.put("rootTaskId", root);
+        item.put("nodeId", entry.path("id").asString(""));
+        item.put("target", target);
+        item.put("question", question);
+        item.put("kind", kind);
+        item.put("timestamp", entry.path("timestamp").asString(""));
+        return item;
+    }
+
+    /** 当前运行的真实用户输入；不接受模型消息、工具材料或其他运行的原话。 */
+    public Optional<String> memorySource(String runId) {
+        return sessionForRun(runId).flatMap(this::memoryEntries).flatMap(entries -> {
+            JsonNode header = entries.getFirst();
+            if (runId.equals(header.path("runId").asString("")))
+                return Optional.of(header.path("request").path("question").asString("") + "\n"
+                        + header.path("request").path("userStyle").asString(""));
+            return entries.stream().filter(e -> runId.equals(e.path("runId").asString(""))
+                    && "followup".equals(e.path("type").asString(""))).findFirst().map(e -> e.path("userMessage").asString(""));
+        });
+    }
+
+    /** 跳过大体积的原文/模型消息/报告行，避免读取画像时重复解析整份研究资料。 */
+    private Optional<List<JsonNode>> memoryEntries(String sessionId) {
+        synchronized (locks.computeIfAbsent(sessionId, key -> new Object())) {
+            try (Stream<String> lines = Files.lines(file(sessionId), StandardCharsets.UTF_8)) {
+                List<JsonNode> entries = lines.filter(line -> MEMORY_TYPE.matcher(line).find()).map(this::parse)
+                        .flatMap(Optional::stream).filter(e -> Set.of("session", "run_state", "chat_turn", "followup")
+                                .contains(e.path("type").asString(""))).toList();
+                return entries.isEmpty() || !"session".equals(entries.getFirst().path("type").asString("")) ? Optional.empty() : Optional.of(entries);
+            } catch (IOException | UncheckedIOException error) { return Optional.empty(); }
+        }
     }
 
     private ObjectNode buildSnapshot(String runId, List<JsonNode> entries) {

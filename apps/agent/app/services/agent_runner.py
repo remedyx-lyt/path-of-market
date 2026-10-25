@@ -26,6 +26,7 @@ from app.schemas.agent import AgentReadArguments
 from app.schemas.financial import ExtractArguments, InspectArguments
 from app.services.model_client import complete_turn
 from app.services.context_compaction import CompactionMixin, ContextMessages, RecallArguments
+from app.services.user_memory import UserMemoryMixin, RecallUserMemoryArguments, RememberUserMemoryArguments
 from app.services.runner_evidence import EvidenceMixin
 from app.services.runner_methods import MethodMixin
 from app.services.runner_omens import OmenMixin
@@ -44,6 +45,8 @@ __all__ = ["AgentRunner", "BudgetStop", "RunLimits", "declarations", "now"]
 logger = logging.getLogger("path_of_market.agent")
 
 TOOL_SPECS = (
+    ("recall_user_memory", "按公司名/关键词回查跨会话研究经历与已确认偏好；历史用户问题不是公司事实证据。", RecallUserMemoryArguments),
+    ("remember_user_memory", "将本次用户表达的长期研究偏好存为待确认建议，必须附逐字用户原话；不能根据年报/模型回复推断画像或覆盖用户确认偏好。", RememberUserMemoryArguments),
     ("recall_research_context", "回查本分支已保存的完整阅读笔记或报告正文。上下文整理后找回细节，不重新付费通读PDF。reading_notes用sourceId/batch，report_section用sectionIndex。", RecallArguments),
     ("find_documents", "从公司/会计年度/截止日找官方完整报告，支持年报、半年报、一季报和三季报；不需要上传。", FindArguments),
     (
@@ -71,6 +74,8 @@ TOOL_SPECS = (
 
 
 TOOL_LABELS = {
+    "recall_user_memory": "回查用户研究记忆",
+    "remember_user_memory": "记录偏好建议",
     "recall_research_context": "回查研究记录",
     "find_documents": "查找报告",
     "read_document": "阅读资料",
@@ -166,7 +171,7 @@ class ToolView:
         return cls(content, projected, excerpt, bool(pages))
 
 
-class AgentRunner(CompactionMixin, ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMixin, ReportMixin):
+class AgentRunner(UserMemoryMixin, CompactionMixin, ReadingMixin, EvidenceMixin, MethodMixin, OmenMixin, WritingMixin, ReportMixin):
     def __init__(self, job, tools, settings, *, limits=None, completion=None, recovery=None):
         self.job, self.tools, self.settings = job, tools, settings
         self.limits = limits or RunLimits()
@@ -178,6 +183,8 @@ class AgentRunner(CompactionMixin, ReadingMixin, EvidenceMixin, MethodMixin, Ome
         self.compaction_count = 0
         self.compaction_attempts = 0
         self.compaction_failed_at = None
+        self.user_memory = None
+        self.memory_loaded = False
         self.messages = recovery["messages"] if recovery else initial_messages(job.request)
         if job.recorder:  # 会话持久化：每条消息（含完整工具结果）同时记入 JSONL
             self.messages = RecordedMessages(self.messages, job.recorder)
@@ -326,6 +333,8 @@ class AgentRunner(CompactionMixin, ReadingMixin, EvidenceMixin, MethodMixin, Ome
 
     async def dispatch(self, name, arguments):
         handlers = {
+            "recall_user_memory": self.recall_user_memory,
+            "remember_user_memory": self.remember_user_memory,
             "recall_research_context": self.recall_research_context,
             "find_documents": self.find_documents,
             "read_document": self.read,
@@ -417,6 +426,8 @@ class AgentRunner(CompactionMixin, ReadingMixin, EvidenceMixin, MethodMixin, Ome
         为了前缀缓存：历史消息的投影只取决于消息本身（与轮次无关），当前底稿和剩余轮数放在最后。
         """
         messages = ContextMessages(self.projected_history())
+        if memory := self.memory_context():
+            messages += [{"role": "user", "content": json.dumps(memory, ensure_ascii=False)}]
         # 机器保存的来源/覆盖/计划不交给摘要模型改写；每次请求都带准确索引。
         source_index = [{"sourceId": sid, "title": s["title"], "kind": s["kind"], "pageCount": s.get("pageCount"),
                          "textComplete": self.coverage.get(sid, {}).get("textComplete"), "noteBatches": len(self.notes.get(sid, []))}
@@ -582,6 +593,10 @@ class AgentRunner(CompactionMixin, ReadingMixin, EvidenceMixin, MethodMixin, Ome
             return ""
         pages = lambda value: "、".join(map(str, value)) if isinstance(value, list) else str(value)
         doc = self.document_title(a.get("documentId", ""))
+        if name == "recall_user_memory":
+            return a.get("query") or "最近研究经历与确认偏好"
+        if name == "remember_user_memory":
+            return "保存带用户原话的待确认建议"
         if name == "recall_research_context":
             return f"阅读记录 {self.document_title(a.get('sourceId', ''))} 第{a.get('batch', 0) + 1}批" if a.get("kind") == "reading_notes" else f"已保存报告第{a.get('sectionIndex', 0) + 1}节"
         if name == "find_documents":
@@ -605,6 +620,10 @@ class AgentRunner(CompactionMixin, ReadingMixin, EvidenceMixin, MethodMixin, Ome
         if result["status"] != "completed":
             return result["error"]["message"]
         data = result["data"]
+        if name == "recall_user_memory":
+            return f"返回{len(data.get('episodes', []))}条研究经历"
+        if name == "remember_user_memory":
+            return "建议已记录，等待用户确认" if data.get("status") == "suggested" else "已有记录，未重复新增"
         if name == "recall_research_context":
             return "返回已保存的完整阅读笔记" if "recalledNotes" in data else "返回已保存的章节正文"
         if name == "find_documents":
@@ -631,6 +650,7 @@ class AgentRunner(CompactionMixin, ReadingMixin, EvidenceMixin, MethodMixin, Ome
         self.job.emit("run_started", "开始研究；模型将选择需要的报告和行情")
         try:
             async with asyncio.timeout(self.limits.max_seconds):
+                await self.load_user_memory()
                 if not self.recovery or self.method_usage is None:
                     self.job.set_phase("methods", "阶段：阅读研究方法、形成研究计划")
                     await self.prepare_methods()

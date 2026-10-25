@@ -20,7 +20,7 @@ from app.services.model_json import DerivedCache, ask_json, stable_key, validati
 class MethodMixin:
     def method_task(self):
         request = self.job.request
-        return {
+        task = {
             "target": request.target,
             "question": request.question,
             "userStyle": request.user_style,
@@ -30,6 +30,10 @@ class MethodMixin:
             "includeMarket": request.include_market,
             "includeCurrentPeriod": request.include_current_period,
         }
+        preferences = self.memory_preferences()
+        if preferences:
+            task["userMemory"] = {"confirmedPreferences": preferences, "instruction": "仅参考相关偏好；本次问题/风格/截止日优先，记忆不是财务证据。"}
+        return task
 
     async def prepare_methods(self):
         references = load_method_bundle(self.job.request)

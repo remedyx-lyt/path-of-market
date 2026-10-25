@@ -35,6 +35,25 @@ main { max-width: 1256px; margin: 0 auto; padding: 52px 48px 64px; }
 .workspace-intro .eyebrow span { margin: 0 10px; color: #aaa; }
 h1 { margin: 16px 0 20px; font-size: 56px; font-weight: 900; line-height: 1.15; }
 .workspace-description { margin: 0; color: #555; font-size: 15px; line-height: 1.8; }
+.user-memory { margin-top: 28px; padding-block: 22px; border-block: 1px solid #dededb; font-size: 14px; line-height: 1.7; }
+.user-memory > details > summary { font-size: 18px; font-weight: 700; }
+.user-memory > details > summary > span { display: block; padding-left: 20px; color: #666; font-size: 12px; font-weight: 400; }
+.user-memory h3 { font-size: 15px; margin: 28px 0 12px; }
+.user-memory .memory-help, .memory-note-label { color: #666; font-size: 12px; }
+.user-memory label { display: block; margin: 10px 0 6px; }
+.user-memory .memory-toggle { display: flex; align-items: center; gap: 8px; }
+.user-memory textarea, .user-memory select { width: 100%; max-width: 100%; padding: 12px; border: 1px solid #d8d8d4; border-radius: 4px; background: #fff; color: #111; font: inherit; }
+.user-memory textarea { resize: vertical; }
+.user-memory .secondary-button { margin-top: 10px; padding: 10px 14px; font-size: 13px; }
+.memory-notes, .memory-companies, .memory-themes { list-style: none; margin: 0; padding: 0; }
+.memory-note { padding: 16px 0; border-bottom: 1px solid #e5e5e5; overflow-wrap: anywhere; }
+.memory-note p { white-space: pre-wrap; }
+.memory-note blockquote { margin: 12px 0; padding-left: 12px; border-left: 2px solid #aaa; color: #555; }
+.memory-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.memory-companies > li { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 12px 0; border-bottom: 1px solid #e5e5e5; }
+.memory-companies span { font-size: 12px; color: #666; }
+.memory-history { padding-left: 20px; }
+.memory-history p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; color: #555; }
 .research-form { margin-top: 34px; padding-top: 26px; border-top: 1px solid #dededb; }
 .form-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 26px; }
 .form-heading h2 { margin: 0; font-size: 19px; font-weight: 700; }
