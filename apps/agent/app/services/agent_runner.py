@@ -295,7 +295,7 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
             return "决定下一步"
         return PHASE_PURPOSE.get(self.job.phase, "提取数据")
 
-    async def model(self, messages, *, tool_specs=None, reading=False, visual=False, report=False, write_only=False, on_text=None, output_limit=None, compacting=False):
+    async def model(self, messages, *, tool_specs=None, reading=False, visual=False, report=False, write_only=False, on_text=None, output_limit=None, compacting=False, tool_choice=None):
         """write_only=True：发送同一组工具定义但禁止调用（tool_choice=none）并要求 JSON，让写作请求与研究轮次共享缓存前缀。
         on_text：流式输出时逐段收到模型文字（写作阶段据此显示“正在写：××”）。"""
         if not compacting:
@@ -317,6 +317,8 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
         settings = replace(self.settings, timeout_seconds=self.settings.report_timeout_seconds) if report else self.settings
         try:
             options = {"tool_choice": "none", "json_mode": True} if write_only else {"json_mode": not bool(tool_specs)}
+            if tool_choice is not None and not write_only:
+                options["tool_choice"] = tool_choice
             if on_text:
                 options["on_text"] = on_text
             message, usage = await self.completion(settings, messages, tools=tool_specs, max_tokens=output_tokens, **options)

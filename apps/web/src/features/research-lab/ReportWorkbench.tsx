@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import type { CSSProperties, FormEvent } from 'react'
+import type { CSSProperties, FormEvent, ReactNode } from 'react'
 import type { AgentResearchReport, ResearchJob } from '../../api/research'
 import { cancelAgentJob, getAgentJob } from '../../api/research'
 import { getDiscussion, pollFollowup, selectedTurns, sendFollowup } from '../../api/discussion'
@@ -10,11 +10,13 @@ import { DiscussionMessages } from './DiscussionMessages'
 import type { PendingMessage } from './DiscussionMessages'
 import { PanelResizeHandle } from './PanelResizeHandle'
 import { readPanelNumber, savePanelNumber } from './panelLayout'
+import { WorkbenchDialog } from './WorkbenchDialog'
 
 // 聊天轮询不重复渲染整份长报告及其图表；切换版本时仍正常更新。
 const StableResearchReport = memo(ResearchReport)
 
-export function ReportWorkbench({ report }: { report: AgentResearchReport }) {
+export function ReportWorkbench({ report, history }: { report: AgentResearchReport; history?: ReactNode }) {
+  const [panel, setPanel] = useState<'options' | 'history' | null>(null)
   const [open, setOpen] = useState(false)
   const [reportVisible, setReportVisible] = useState(true)
   const [compact, setCompact] = useState(false)
@@ -172,11 +174,10 @@ export function ReportWorkbench({ report }: { report: AgentResearchReport }) {
         <button type="button" aria-pressed={reportVisible && (!compact || !open)} aria-controls="report-reading" onClick={toggleReport}>{compact && open ? '查看报告' : reportVisible ? '收起报告' : '展开报告'}</button>
         <button type="button" aria-expanded={open} aria-controls="report-discussion" onClick={() => open ? closeChat() : setOpen(true)}>{open ? '收起对话' : '报告对话'} ↗</button>
       </div>
-      <div className="report-display-controls">
-        <label htmlFor="report-version">版本</label><select id="report-version" value={versionId} disabled={busy || !data?.versions.length} onChange={(e) => {
-          const id = e.target.value; setVersionId(id); setLeaf(id); setProgress(null); remember(id, id)
-        }}>{!data?.versions.length && <option value="">初版</option>}{data?.versions.map((v) => <option key={v.id} value={v.id}>V{v.reportVersion}{v.parentVersionId ? ' · 修订' : ' · 初版'}</option>)}</select>
-        <div className="reading-zoom" aria-label="阅读字号"><button type="button" aria-label="缩小文字" disabled={fontSize <= 14} onClick={() => changeFont(fontSize - 1)}>A−</button><span>{fontSize}</span><button type="button" aria-label="放大文字" disabled={fontSize >= 22} onClick={() => changeFont(fontSize + 1)}>A＋</button></div>
+      <div className="workbench-tools">
+        {open && <button type="button" className="text-button" onClick={focusChat}>{reportVisible ? '放大对话' : '并排查看'}</button>}
+        {history && <button type="button" className="text-button" onClick={() => setPanel('history')}>过程记录</button>}
+        <button type="button" className="text-button" onClick={() => setPanel('options')}>选项 ⋯</button>
       </div>
     </div>
     <div className="report-and-chat">
@@ -189,24 +190,7 @@ export function ReportWorkbench({ report }: { report: AgentResearchReport }) {
       </div>
       {open && reportVisible && <PanelResizeHandle width={chatWidth} onChange={(value) => { setChatWidth(value); savePanelNumber('pm-chat-width', value) }} />}
       {open && <aside className="report-discussion" id="report-discussion" aria-label="报告对话">
-        <div className="discussion-heading"><div><h2>报告对话</h2><span>{report.target} · 截至 {report.asOfDate}</span></div><div><button type="button" className="text-button" onClick={focusChat}>{reportVisible ? '放大对话' : '并排查看'}</button><button type="button" className="text-button" onClick={closeChat}>收起</button></div></div>
         {latest && latest.id !== leaf && !busy && <button className="latest-answer" type="button" onClick={() => chooseTurn(latest)}>有更新的对话 · 查看最新回复 ↓</button>}
-        <details className="discussion-settings"><summary>对话选项与历史分支</summary>
-          <button type="button" className="text-button" disabled={busy} onClick={() => {
-            setError('')
-            const abort = new AbortController(); controller.current = abort
-            void refresh(abort.signal).then((next) => {
-              const waiting = [...next.turns].reverse().find((t) => t.status === 'pending')
-              if (waiting) { setLeaf(waiting.id); void watch(waiting.runId, abort) }
-              else { const turn = next.turns.at(-1); if (turn) chooseTurn(turn); setPending(null) }
-            }).catch((e: Error) => setError(e.message))
-          }}>刷新记录 / 查看最新回复</button>
-          <label htmlFor="discussion-branch">从哪个节点继续</label><select id="discussion-branch" value={leaf} disabled={busy || !data} onChange={(e) => {
-            const turn = data?.turns.find((t) => t.id === e.target.value)
-            if (turn) chooseTurn(turn)
-            else { setLeaf(e.target.value); setVersionId(e.target.value); setProgress(null); remember(e.target.value, e.target.value) }
-          }}>{data?.versions.map((v) => <option key={v.id} value={v.id}>从 V{v.reportVersion} 开始新分支</option>)}{data?.turns.map((t, index) => <option key={t.id} value={t.id}>对话 {index + 1} · {t.userMessage.slice(0, 24)}{t.status === 'completed' ? '' : '（未完成）'}</option>)}</select>
-        </details>
         {!isComplete ? <p>请先完成研究，再开启报告对话。</p> : <>
           <DiscussionMessages turns={turns} report={shownReport} pending={pending} progress={progress} busy={busy} onRetry={retry} />
           <form onSubmit={(event) => void send(event)} className="discussion-form">
@@ -223,5 +207,31 @@ export function ReportWorkbench({ report }: { report: AgentResearchReport }) {
         </>}
       </aside>}
     </div>
+    {panel && <WorkbenchDialog title={panel === 'history' ? '完整研究过程与工具记录' : '显示与对话分支'} onClose={() => setPanel(null)}>
+      {panel === 'history' ? history : <>
+      <div className="report-display-controls">
+        <label htmlFor="report-version">版本</label><select id="report-version" value={versionId} disabled={busy || !data?.versions.length} onChange={(e) => {
+          const id = e.target.value; setVersionId(id); setLeaf(id); setProgress(null); remember(id, id)
+        }}>{!data?.versions.length && <option value="">初版</option>}{data?.versions.map((v) => <option key={v.id} value={v.id}>V{v.reportVersion}{v.parentVersionId ? ' · 修订' : ' · 初版'}</option>)}</select>
+        <div className="reading-zoom" aria-label="阅读字号"><button type="button" aria-label="缩小文字" disabled={fontSize <= 14} onClick={() => changeFont(fontSize - 1)}>A−</button><span>{fontSize}</span><button type="button" aria-label="放大文字" disabled={fontSize >= 22} onClick={() => changeFont(fontSize + 1)}>A＋</button></div>
+      </div>
+        <div className="discussion-settings">
+          <button type="button" className="text-button" disabled={busy} onClick={() => {
+            setError('')
+            const abort = new AbortController(); controller.current = abort
+            void refresh(abort.signal).then((next) => {
+              const waiting = [...next.turns].reverse().find((t) => t.status === 'pending')
+              if (waiting) { setLeaf(waiting.id); void watch(waiting.runId, abort) }
+              else { const turn = next.turns.at(-1); if (turn) chooseTurn(turn); setPending(null) }
+            }).catch((e: Error) => setError(e.message))
+          }}>刷新记录 / 查看最新回复</button>
+          <label htmlFor="discussion-branch">从哪个节点继续</label><select id="discussion-branch" value={leaf} disabled={busy || !data} onChange={(e) => {
+            const turn = data?.turns.find((t) => t.id === e.target.value)
+            if (turn) chooseTurn(turn)
+            else { setLeaf(e.target.value); setVersionId(e.target.value); setProgress(null); remember(e.target.value, e.target.value) }
+          }}>{data?.versions.map((v) => <option key={v.id} value={v.id}>从 V{v.reportVersion} 开始新分支</option>)}{data?.turns.map((t, index) => <option key={t.id} value={t.id}>对话 {index + 1} · {t.userMessage.slice(0, 24)}{t.status === 'completed' ? '' : '（未完成）'}</option>)}</select>
+        </div>
+      </>}
+    </WorkbenchDialog>}
   </section>
 }

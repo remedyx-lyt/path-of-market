@@ -481,3 +481,29 @@ main:has(.workspace-layout--report) { max-width: none; height: 100dvh; padding: 
   .workspace-layout--report .composer-options { margin-bottom: 4px; }
   .workspace-layout--report .discussion-actions > span { max-width: 58%; font-size: 10px; }
 }
+
+/* 单层内容工具条：显示/分支/研究记录打开为浮层，不占聊天正文高度。 */
+.workspace-layout--report .report-workbench-toolbar { min-height: 44px; padding: 5px 14px; flex-wrap: nowrap; }
+.workbench-tools { display: flex; align-items: center; gap: 14px; margin-left: auto; flex-shrink: 0; }
+.workbench-tools button { font-size: 12px; white-space: nowrap; }
+.workspace-panel-hint { display: none; }
+.workbench-dialog { position: fixed; inset: 0; margin: auto; width: min(760px, calc(100vw - 32px)); max-height: 85dvh; padding: 0; border: 1px solid #dededb; border-radius: 10px; color: #222; background: #fff; box-shadow: 0 16px 64px #0002; }
+.workbench-dialog::backdrop { background: #0004; }
+.workbench-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid #e5e5e1; }
+.workbench-dialog > header h2 { margin: 0; font-size: 16px; }
+.workbench-dialog > header button { background: transparent; color: #666; font-size: 12px; }
+.workbench-dialog-body { padding: 18px 20px; max-height: calc(85dvh - 58px); overflow-y: auto; }
+.workbench-dialog .report-display-controls { flex-wrap: wrap; margin-bottom: 16px; gap: 12px; }
+.workbench-dialog .discussion-settings { padding: 16px 0 0; max-height: none; overflow: visible; border-bottom: 0; border-top: 1px solid #ededeb; }
+.workbench-dialog .discussion-settings label { display: block; margin: 18px 0 8px; }
+.workbench-dialog .activity-replay { margin: 0; }
+.workspace-layout--report .discussion-form { padding: 8px 16px; }
+.workspace-layout--report .discussion-form textarea { height: 60px; min-height: 48px; }
+@media (max-width: 700px) {
+  .workspace-layout--report .report-workbench-toolbar { padding-inline: 10px; gap: 4px; }
+  .pane-tabs button { padding-inline: 6px; font-size: 12px; }
+  .workbench-tools { gap: 10px; }
+  .workbench-tools button { font-size: 11px; }
+  .workspace-layout--report .discussion-form { padding: 6px 12px; }
+  .workspace-layout--report .discussion-form textarea { height: 52px; }
+}

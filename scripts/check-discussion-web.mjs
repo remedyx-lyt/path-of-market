@@ -28,7 +28,7 @@ try {
   assert.deepEqual(methods, ['GET'])
   for (const version of data.versions) {
     assert.ok(agentReportSchema.safeParse(version.report).success)
-    assert.match(renderToStaticMarkup(createElement(ReportWorkbench, { report: version.report })), /id="report-version"/)
+    assert.match(renderToStaticMarkup(createElement(ReportWorkbench, { report: version.report })), /选项 ⋯/)
   }
   const follow = data.turns.find((t) => t.userMessage === 'QA_FOLLOW')
   assert.deepEqual(selectedTurns(data.turns, follow.id).map((t) => t.userMessage), ['QA_FIRST', 'QA_REVISE', 'QA_FOLLOW'])
@@ -37,9 +37,9 @@ try {
   assert.deepEqual(selectedTurns(data.turns, data.versions[0].id), [])
   const html = renderToStaticMarkup(createElement(ReportWorkbench, { report: data.versions[0].report }))
   assert.match(html, /报告对话/)
-  assert.match(html, /report-version/)
+  assert.match(html, /选项 ⋯/)
   assert.match(html, /收起报告/)
-  assert.match(html, /aria-label="放大文字"/)
+  assert.doesNotMatch(html, /discussion-heading/); assert.doesNotMatch(html, /discussion-settings/)
   const optimistic = renderToStaticMarkup(createElement(DiscussionMessages, { turns: [], report: data.versions[0].report,
     pending: { message: '我刚刚发送的问题 <script>bad()</script>', action: 'ask', requestId: 'request-id', parentId: 'parent-id' },
     progress: { followup: { draft: true, answer: '实际分段回答 <script>bad()</script>' }, modelCalls: 1, events: [], usage: {} }, busy: true, onRetry() {} }))
@@ -53,7 +53,7 @@ try {
     isGenerating: false, hasError: false, job: { taskId: data.versions[0].report.run.taskId,
       status: 'completed', startedAt: data.versions[0].report.run.startedAt,
       events: [{ id: 'x', type: 'run_completed', message: 'done' }], modelCalls: 3, usage: {} } }))
-  assert.match(preview, /查看完整研究过程与工具记录/)
+  assert.match(preview, /过程记录/); assert.doesNotMatch(preview, /class="activity-replay"/)
   const escaped = renderToStaticMarkup(createElement(ReportText, { text: '<script>alert(1)</script> **结论**' }))
   assert.doesNotMatch(escaped, /<script>/)
   assert.match(escaped, /<strong>结论<\/strong>/)

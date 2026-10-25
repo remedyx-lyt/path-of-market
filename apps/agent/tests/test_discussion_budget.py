@@ -260,13 +260,49 @@ class DiscussionBudget(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observations, [None, None])
         self.assertNotIn('draft', job.followup)
 
-    async def test_repeated_missing_new_material_wraps_up_explicitly_instead_of_format_failure(self):
+    async def test_disabled_search_can_only_return_explicit_incomplete_answer(self):
         job, runner = await self.make_discussion(message="再查公开资料")
         runner.discussion_source_baseline = [DOC_ID, WEB]
+        self.tools.public_web.gateway.settings = __import__('dataclasses').replace(self.tools.public_web.gateway.settings, enabled=False)
         await self.run_local(runner)
         self.assertEqual(job.status, 'completed', job.error)
         self.assertTrue(job.followup['answer'].startswith('【补查未完成】'))
         self.assertEqual(job.model_calls, 3)
+
+    async def test_explicit_search_requires_native_tool_and_uses_small_context(self):
+        _, runner = await self.make_discussion(message="再查行业和大盘")
+        runner.discussion_source_baseline = [DOC_ID, WEB]
+        runner.base['sections'][0]['content'] = 'LARGE_REPORT' * 10000
+        self.assertEqual(runner.supplement_tool_choice()['function']['name'], 'search_public_information')
+        context = json.dumps(runner.supplement_context(), ensure_ascii=False)
+        self.assertNotIn('LARGE_REPORT', context)
+        self.assertNotIn('RESEARCH_TRACE', context)
+        self.assertIn('再查行业和大盘', context)
+        runner.web_discovered['web-fresh'] = {'format': 'web', 'publishedAt': '2026-10-22'}
+        runner.job.tool_calls.append({'name': 'search_public_information', 'status': 'completed'})
+        self.assertEqual(runner.supplement_tool_choice()['function']['name'], 'read_web_document')
+        runner.job.tool_calls += [{'name': 'read_web_document', 'arguments': {'sourceId': 'web-fresh'}, 'status': 'failed'}] * 2
+        self.assertEqual(runner.supplement_tool_choice()['function']['name'], 'search_public_information')
+
+    async def test_discovery_numbers_never_reach_answer_context(self):
+        _, runner = await self.make_discussion(message="再查行业和大盘")
+        runner.messages.append({'role': 'tool', 'tool_call_id': 'search', 'content': json.dumps({
+            'status': 'completed', 'data': {'results': [{'sourceId': 'web-unread', 'title': '待阅读',
+                'snippet': 'UNREAD_PRICE_3713.03', 'url': 'https://example.com/page', 'publishedAt': '2026-10-22'}]}})})
+        text = json.dumps(runner.supplement_context(), ensure_ascii=False)
+        self.assertNotIn('UNREAD_PRICE_3713.03', text)
+        self.assertIn('待阅读', text)
+        self.assertIn('新增报道中的项目进展', text)
+
+    async def test_provider_ignoring_required_tool_cannot_masquerade_as_searched(self):
+        job, runner = await self.make_discussion(message="再查公开资料")
+        runner.discussion_source_baseline = [DOC_ID, WEB]
+        await self.run_local(runner)
+        self.assertEqual(job.status, 'failed')
+        self.assertEqual(job.error['code'], 'MODEL_INVALID_RESPONSE')
+        self.assertEqual(runner.completion.await_count, 3)
+        self.assertTrue(all(c.kwargs['tool_choice']['function']['name'] == 'search_public_information' for c in runner.completion.call_args_list))
+        self.assertFalse(any(e['type'] == 'discussion_evidence_used' for e in job.events))
 
     async def test_questions_about_saved_material_or_no_search_do_not_force_new_research(self):
         for message in ['不用再查，解释现金流', '不要搜索公开资料，只解释报告', '上次补查的资料是什么意思']:

@@ -22,8 +22,8 @@ export function ResearchPreview({ draft, report, isGenerating, hasError, job, on
       </div>
       {partial && onContinue && !isGenerating && <div className="continuation-actions"><button className="primary-button" type="button" onClick={onContinue}>从已保存进度继续 →</button><p>保留已读资料与证据，继续补查和写作；会产生新的模型调用。</p></div>}
       {retryReview && onContinue && !isGenerating && <div className="continuation-actions"><button className="primary-button" type="button" onClick={onContinue}>仅重试报告复核 →</button><p>正文和表格已保留，模型复核尚未完成。仅重新复核，会产生模型调用。</p></div>}
-      {report && job?.events.length ? <ResearchHistory job={job} live={isGenerating} /> : null}
-      {report ? report.mode === 'agent' ? <ReportWorkbench key={report.run.taskId} report={report} /> : <ResearchReport report={report} /> : job?.events.length ? <><h2>{job.target}</h2><ResearchHistory job={job} live={isGenerating} /></> : <>
+      {report && report.mode !== 'agent' && job?.events.length ? <ResearchHistory job={job} live={isGenerating} /> : null}
+      {report ? report.mode === 'agent' ? <ReportWorkbench key={report.run.taskId} report={report} history={job?.events.length ? <ResearchHistory job={job} live={isGenerating} /> : undefined} /> : <ResearchReport report={report} /> : job?.events.length ? <><h2>{job.target}</h2><ResearchHistory job={job} live={isGenerating} /></> : <>
       <h2>这次研究，<br />关注什么？</h2>
       <dl className="preview-fields">
         <div>

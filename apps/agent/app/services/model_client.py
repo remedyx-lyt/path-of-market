@@ -179,7 +179,7 @@ async def complete_turn(
     tools: list | None = None,
     max_tokens: int | None = None,
     json_mode: bool = True,
-    tool_choice: str = "auto",
+    tool_choice: str | dict = "auto",
     on_text=None,
 ) -> tuple[dict, dict]:
     """标准 assistant/tool 协议；工具执行留给 Runner，截断的工具参数不执行。
