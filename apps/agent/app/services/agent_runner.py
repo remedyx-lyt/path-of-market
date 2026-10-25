@@ -340,6 +340,25 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
         )
         return message
 
+    async def decision_turn(self, messages):
+        """决策失败不丢证据：只重试完整消息，资料齐备时交给已有分节写作器。"""
+        recoverable = {"MODEL_INVALID_RESPONSE", "MODEL_TIMEOUT", "MODEL_UNAVAILABLE", "MODEL_UPSTREAM_ERROR"}
+        for attempt in range(3):
+            try:
+                return await self.model(messages, tool_specs=self.declarations())
+            except ModelServiceError as error:
+                if error.code not in recoverable:
+                    raise
+                if error.code == "MODEL_INVALID_RESPONSE" and self.can_budget_finish():
+                    self.job.emit("decision_to_writing", "决策回复未完整，但必需证据已读齐：转入分节写作", errorCode=error.code)
+                    return {"role": "assistant", "content": '{"ready":true}'}
+                if attempt == 2:
+                    raise
+                self.job.emit("decision_retry", "决策回复未完成：保留证据重试，不执行不完整工具消息", attempt=attempt + 1, errorCode=error.code)
+                messages = messages + [{"role": "user", "content":
+                    "上一条决策回复未完整或暂时失败，没有执行其中任何工具。请仅返回必要的少量完整工具调用；"
+                    '证据足够时仅返回 {"ready":true}。决策阶段不要写长报告，正文由后续分节写作完成。'}]
+
     async def raw_tool(self, name, arguments):
         self.check_budget()
         result = await asyncio.to_thread(self.tools.execute, name, arguments)
@@ -713,6 +732,12 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
                         self.messages.append(assistant)
                         if await self.finish(assistant):
                             return
+                    elif self.can_budget_finish():
+                        self.job.emit("resume_ready_to_write", "证据已完整恢复：直接继续分节写作，不重新通读")
+                        assistant = await self.compose()
+                        self.messages.append(assistant)
+                        if await self.finish(assistant):
+                            return
                 for step in range(1, self.limits.max_steps + 1):
                     self.steps = step
                     self.check_budget()
@@ -724,7 +749,7 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
                     if self.context_wrapup and self.pending_materials():
                         raise BudgetStop('context_budget_incomplete_evidence')
                     # 收尾写作：不再让模型选工具，用已取得的证据直接撰写（核查不通过时带着诊断再写）。
-                    assistant = await self.compose() if self.context_wrapup else await self.model(messages, tool_specs=self.declarations())
+                    assistant = await self.compose() if self.context_wrapup else await self.decision_turn(messages)
                     self.messages.append(assistant)
                     calls = assistant.get("tool_calls") or []
                     names = [TOOL_LABELS.get(c["function"]["name"], c["function"]["name"]) for c in calls]

@@ -5,7 +5,7 @@ from dataclasses import replace
 import json
 import unittest
 
-from support import DOC_ID, SETTINGS, FakeModel, RunnerFixture, tool_call
+from support import DOC_ID, SETTINGS, USAGE, FakeModel, RunnerFixture, tool_call
 from app.services.agent_runner import AgentRunner, BudgetStop, RunLimits
 from app.services.research_jobs import ResearchJob
 from app.services.research_recovery import current_messages, legacy_recovery, load_recovery, pending_calls
@@ -96,6 +96,7 @@ class Continuation(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(child.status, "completed", child.error)
         self.assertEqual(model.count("plan"), 0)
         self.assertEqual(model.count("reading"), 0)
+        self.assertEqual(model.count("decision"), 0)
         self.assertEqual(runner.coverage, previous.coverage)
         self.assertEqual(runner.notes, previous.notes)
         self.assertEqual(parent.status, "partial")
@@ -115,7 +116,7 @@ class Continuation(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual([c["toolCallId"] for c in child.tool_calls], [calls[1]["id"]])
         self.assertEqual(pending_calls(runner.messages), [])
 
-    async def test_research_budget_reserves_calls_to_finish_instead_of_empty_report(self):
+    async def test_complete_evidence_resumes_writing_without_wasting_decision_budget(self):
         parent, _ = await self.stopped()
         recovery = load_recovery(self.tools, parent.task_id)
         model = FakeModel(script=[[("read_document", {"documentId": DOC_ID, "mode": "full"})]])
@@ -124,9 +125,59 @@ class Continuation(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(child, self.tools, SETTINGS, completion=model, recovery=recovery, limits=limits)
         await runner.run()
         self.assertEqual(child.status, "completed", child.error)
-        self.assertTrue(any(e["type"] == "budget_wrapup" for e in child.events))
+        self.assertTrue(any(e["type"] == "resume_ready_to_write" for e in child.events))
+        self.assertEqual(model.count("decision"), 0)
         self.assertLessEqual(child.model_calls, 24)
         self.assertGreater(model.count("compose"), 0)
+
+    async def test_truncated_decision_after_full_reading_enters_section_writer(self):
+        class Truncated(FakeModel):
+            async def __call__(self, settings, messages, **kwargs):
+                if self.kind(messages, kwargs) == "decision" and self.count("decision") == 2:
+                    error = ModelServiceError("MODEL_INVALID_RESPONSE", "truncated", 502)
+                    error.finish_reason, error.usage = "length", USAGE
+                    raise error
+                return await super().__call__(settings, messages, **kwargs)
+
+        model = Truncated(ready=True)
+        job, runner = self.runner(model)
+        await runner.run()
+        self.assertEqual(job.status, "completed", job.error)
+        self.assertGreater(model.count("section"), 0)
+        self.assertTrue(any(e["type"] == "decision_to_writing" for e in job.events))
+        self.assertTrue(any(e["type"] == "model_failed" and e.get("finishReason") == "length" for e in job.events))
+
+    async def test_transient_decision_retries_without_duplicate_tool_execution(self):
+        class Temporary(FakeModel):
+            failed = False
+
+            async def __call__(self, settings, messages, **kwargs):
+                if self.kind(messages, kwargs) == "decision" and not self.failed:
+                    self.failed = True
+                    raise ModelServiceError("MODEL_TIMEOUT", "temporary", 504)
+                return await super().__call__(settings, messages, **kwargs)
+
+        model = Temporary(ready=True)
+        job, runner = self.runner(model)
+        await runner.run()
+        self.assertEqual(job.status, "completed", job.error)
+        self.assertEqual(sum(e["type"] == "decision_retry" for e in job.events), 1)
+        self.assertEqual(len(job.tool_calls), 3)
+        self.assertEqual(model.count("reading"), 1)
+
+    async def test_account_error_does_not_retry_or_start_writer(self):
+        class Account(FakeModel):
+            async def __call__(self, settings, messages, **kwargs):
+                if self.kind(messages, kwargs) == "decision":
+                    raise ModelServiceError("MODEL_AUTH_FAILED", "account", 502)
+                return await super().__call__(settings, messages, **kwargs)
+
+        model = Account(ready=True)
+        job, runner = self.runner(model)
+        await runner.run()
+        self.assertEqual(job.status, "failed")
+        self.assertFalse(any(e["type"] == "decision_retry" for e in job.events))
+        self.assertEqual(model.count("compose"), 0)
 
     async def test_local_tools_still_work_at_model_call_limit(self):
         parent, runner = await self.stopped()
