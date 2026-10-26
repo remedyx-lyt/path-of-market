@@ -77,6 +77,8 @@ flowchart LR
 
 已验证环境：Windows 11、Python 3.14、JDK 25、Node.js 24。启动脚本为 PowerShell。
 
+> Windows 提示：第三方方法文件路径较深，请克隆到较短的目录（如 `C:\code\path-of-market`），或先运行 `git config --global core.longpaths true`。
+
 1. 复制 `.env.example` 为 `.env`，填入模型密钥（推荐 DeepSeek，只填 `DEEPSEEK_API_KEY` 即可）。
 2. 启动三个服务（首次会自动建 Python 虚拟环境、安装依赖、构建 Java）：
 
