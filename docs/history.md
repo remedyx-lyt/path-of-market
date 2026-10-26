@@ -95,7 +95,7 @@
 - 主模块：用户画像、板块地图、深研室、追猎者、锐眼、研究日志、数据层。
 - 模块命名：`Deadeye / 锐眼`、`Pathfinder / 追猎者`。
 - 四个研究预兆及完整研究规格已写入 `report-omens.md`：崇高、远古、机遇、深渊回响。
-- 前端设计方向：黑白极简、高对比、大留白、强字体；参考图已保存在 `docs/assets/easy-farm-style-reference.png`。
+- 前端设计方向：黑白极简、高对比、大留白、强字体；当时的第三方页面参考截图属他人设计，公开仓库不收录。
 - 研究 Agent 的动态工具循环和验收要求已写入 `architecture.md`、`agent-concepts.md`、`task-board.md`。
 - 实施顺序已确认为 M0 完整应用骨架、M1 真实 Agent、M2 研究积累与资料完善、M3 特色功能。
 - M0 内部依次完成 Python 演示服务、Java 启动与调用、网页启动与展示；先用 mock 报告跑通整条链路。
