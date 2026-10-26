@@ -1,171 +1,125 @@
 # Path of Market（市场之路）
 
-Path of Market（市场之路）是一个基于大模型的个人财经研究工作台，内部包含研究 Agent。它帮助用户持续积累资料、比较变化，从不同视角展开有来源的分析，并发现和自己研究风格相关的线索。它不是自动交易系统，也不是荐股系统。
+**基于大模型的 A 股公司研究 Agent。** 输入公司、研究问题和截止日期，它自己去找年报、整本读完、取结构化财务数据和行情，写出带来源和图表的研究报告；之后可以围绕报告继续追问、补查和修订。
 
-第一版做成本地运行的网页应用，通过浏览器使用；功能稳定后再考虑线上部署或桌面客户端。
+> 不是荐股或自动交易工具。报告区分事实、推断和缺口，数字可追溯到来源，但不等于独立审计。
 
-## 当前状态
+![浏览一份真实报告：结论、财务图、业务结构](docs/assets/showcase/demo-report.gif)
 
-截至 2026-10-24，已实现 M0、M1 端到端研究链路，以及 M2-9 活动流、M2-1 JSONL 会话保存；目前是可运行的早期研究 Agent，稳定性仍需多公司验收。最新的阅读截断恢复、错误诊断、方法校验与 PDF 渲染修复见 [稳定性审查](docs/reliability-review-2026-10-24.md)，当前任务以 [current-state.md](docs/current-state.md) 为准。网页经 Java、Python 自动找报告、分批阅读、查询日线，生成带来源和图表的研究报告。
+<sub>真实运行结果（DeepSeek `deepseek-flash`），宁德时代 2021–2025 五年研究，截止 2026-10-23。动图为浏览已完成报告的录制。</sub>
 
-已初始化本地 Git，分支为 `main`。当前没有配置远程地址，代码和提交先保存在本地。
+## 一个真实案例
 
-2026-10-24 晚补充：[调用预算与任务接续](docs/budget-and-continuation.md) 已接入。天齐旧任务读完686页后碰到72次上限；修复后新增7次调用完成正文、表格与复核，没有重读全文。未完成报告可点“从已保存进度继续”；查看与恢复轮询不会启动收费研究。随后新增 F17 大纲→逐节保存→摘要，失败只重试未完成部分，已通过隔离检查，未额外付费重生成同一报告。导出仍待做；聊天和上下文压缩见下方最新进展。
+宁德时代，问题“公司详细情况。近期变化。”，从未读过的公司第一次研究：
 
-按用户要求先补齐了财务研究 Skill、财务表图与局部 PDF 原页视觉，随后完成代码整理、token 优化与 M1-4。当前11个逻辑工具/原8个底层公开数据工具，加2个只读MCP远端工具（含本地研究记录、跨会话记忆回查和偏好建议）；不选预兆也按研究问题选择原版 Skill，选了预兆再叠加专属方法与检查；16个 Anthropic 原版 Skill/36个文件按许可保留。相关原版方法完整交给模型形成可调整的研究计划，模型主动选择业务/财务/研发/风险图并嵌入相关章节；不机械按图数配额。见 [方法实际使用与按论点选图](docs/methods-and-section-figures.md) 和 [研究Skill与表图说明](docs/financial-research-skill.md)。
+| 项目 | 实际数据 |
+| --- | --- |
+| 自动找到并整本通读 | 5 份年报 + 1 份半年报，共 1,317 页 |
+| 结构化财务数据 | AKShare（东方财富数据中心）三大报表与主营构成，按披露日过滤到截止日 |
+| 产出 | 11 节正文、9 张数据表、财务/业务/行情图，每节附来源 |
+| 过程 | 一次跑完：180 次模型调用、346 万 token（缓存命中 191 万）、约 20 分钟 |
+| 费用 | 按 2026-10 DeepSeek 官方价格约 0.3–0.6 美元（闲时/高峰） |
 
-[查看已持久化的中际旭创案例](http://127.0.0.1:5173/?task=0c32562d-04e8-47ef-aea3-49885bd87486) 不会重新调用模型，服务重启后可从 JSONL 打开报告与过程记录。较早的 `921f4324` 案例产生于会话持久化前，原进程退出后链接可能失效，备份为 `storage/runs/section-figures-live.json` 和聊天工作区 `outputs/`。侧栏聊天基础版已接入（见M2-4说明）；未完成任务手动接续已接入，边界见上述说明。
+同一家公司再次研究会复用已有阅读记录，用量明显更少。
 
-2026-10-25 最新：M2-2单用户研究记忆已接入。输入区下方可展开“研究记忆与偏好”，自动聚合成功研究的对象/问题与主题观察；确认偏好进入新研究的方法计划、正文及报告后追问，模型可提出带用户原话的待确认建议。可编辑、移除、关闭与回查，当前任务优先；持久记忆不提交Git。118项Python单测、20项记忆HTTP与32项聊天/压缩/恢复集成通过，M2-2该轮验收真实模型调用0次。学习入口见[M2-2说明](docs/m2-2-user-memory.md)、[M2-4说明](docs/m2-4-report-discussion.md)、[M2-5说明](docs/m2-5-context-compaction.md)。M2-7现已接入公开MCP搜索与网页全文阅读，默认无需额外key，见[MCP说明](docs/m2-7-public-web-mcp.md)。常规年报五年、远古十年已接入，已完成紫金五年与天齐十年真实报告，过程故障与数字核验限制保留，见[F8说明](docs/f8-history-window.md)。之后整理GitHub展示版README、架构、截图和改进计划，当前未创建远程仓库。
+## 能做什么
 
-本轮真实最终案例：[紫金矿业五年](http://127.0.0.1:5173/?task=0515255b-74aa-424e-abbf-7ed1a7d57a8d)、[天齐锂业十年](http://127.0.0.1:5173/?task=69850535-1d52-4126-86f7-5bac08077bd7)。161项Python全量与32项隔离HTTP、真实页面/图表/标签开关/三宽度通过；历史回放显示全部接续、错误与累计用量。两例最终完成不代表任意任务零故障；下一优先为长任务稳定性与数字语义核验，暂不扩功能。具体范围见[F8实测说明](docs/f8-history-window.md)。
+| 能力 | 说明 |
+| --- | --- |
+| 自动找资料 | 从巨潮资讯按公司、年度、截止日找官方年报/季报，不用手动上传 PDF |
+| 整本阅读 | 分批读完全部页面并记录覆盖范围；扫描页用视觉模型补读；不只靠关键词搜索 |
+| 结构化财务数据 | 营收、利润、现金流、资产负债及分产品/地区/行业收入与毛利率直接取自 AKShare，年报负责经营细节、产能、风险与管理层表述 |
+| 行情 | 日线、后复权区间变化、回撤、波动，经营与价格并列观察但不当因果 |
+| 公开网页 | 通过 MCP 搜索并通读网页正文；搜索摘要只用于发现，不当证据 |
+| 报告与图表 | 模型按论点选图、自做数据表；程序逐格核对表中数字是否出现在来源里 |
+| 追问与修订 | 围绕报告追问、明确补查、局部修订并保留版本与对话分支 |
+| 过程可见 | 实时显示阶段、工具调用、模型用量；完成后可回放全过程 |
+| 记忆 | 记住研究过的对象与主题；用户确认的偏好进入后续研究 |
 
-## 自动资料工具（M1-2）
+| | |
+| --- | --- |
+| ![三栏工作台：研究设置、报告、对话](docs/assets/showcase/01-workbench.png) | ![财务图，数据来自 AKShare](docs/assets/showcase/03-financial-charts.png) |
+| 工作台：设置、报告、对话可开合与拖宽 | 财务表图：同期间比较，来源可点开 |
+| ![分产品收入结构与毛利率](docs/assets/showcase/04-business-mix.png) | ![研究过程与工具记录](docs/assets/showcase/06-process.png) |
+| 业务结构：占比、趋势与毛利率 | 过程记录：每次模型调用与工具调用、用量与耗时 |
 
-输入公司与年度，程序自己寻找和下载公开年报，不需要先上传 PDF。工具层真实联网验收已通过同花顺两份年报与沪市报告查找；详细入口、六个工具及限制见 [M1-2 说明](docs/m1-2-tools.md)。
+![围绕报告追问与过程回放](docs/assets/showcase/demo-chat-process.gif)
 
-```powershell
-.\apps\agent\.venv\Scripts\python.exe .\scripts\try-report-tools.py --company 同花顺 --years 2024 2025 --as-of 2026-10-23 --query 研发投入金额
+<sub>紫金矿业报告：放大对话阅读补查回答（如实说明只读到部分网页正文）→ 查看 7 次运行、255 次调用的完整过程（含失败与续跑）→ 版本与对话分支。</sub>
+
+更多截图：[报告正文](docs/assets/showcase/02-report.png) · [追问回答](docs/assets/showcase/05-followup-chat.png) · [记忆与偏好](docs/assets/showcase/07-memory.png) · [资料来源](docs/assets/showcase/08-sources.png)
+
+## Agent 是怎么做的
+
+- **工具循环**：模型根据目标和工具结果决定下一步（11 个工具：找报告、读报告（通读/按页/关键词回查）、行情、看 PDF 原页、正文取数、MCP 网页搜索、网页通读、研究记录回查、记忆回查、偏好建议、读研究方法），程序校验参数并执行，结果回传后模型再决定补查还是写作。循环参考 [Pi](https://github.com/earendil-works/pi) 与 DeepSeek 工具协议实现，没有引入编排框架。
+- **上下文管理**：完整工具结果留在记录里，每轮只投影有限要点；接近上限时摘要较早历史，原始证据可按需回查。
+- **会话与恢复**：消息逐条写入 JSONL（`id`/`parentId` 分支），加执行检查点；预算用尽或中断后可从保存处继续，已读资料不重读。
+- **两层约束（harness）**：提示词规定格式与边界；程序硬性核对引用来源、阅读覆盖、表格数字、图表 ID 与截止日。格式类问题自动整理，真实性问题严格把关。
+- **研究方法**：按问题加载 [Anthropic financial-services](third_party/anthropic-financial-services) 原版金融研究 Skill（Apache-2.0，保留许可）形成研究计划。
+- **预算**：调用次数、token、时间都有上限，按研究年限放宽，并为写作预留空间。
+
+设计依据与来源见 [设计决策](docs/agent-design-decisions.md)。
+
+## 架构
+
+```mermaid
+flowchart LR
+  W[React 网页<br/>5173] --> J[Java Spring Boot<br/>8080<br/>任务 · 会话 JSONL · 记忆]
+  J --> P[Python FastAPI<br/>8000<br/>研究 Agent 循环]
+  P --> M[大模型<br/>DeepSeek / OpenAI 兼容]
+  P --> T1[巨潮资讯<br/>年报 PDF]
+  P --> T2[AKShare<br/>结构化财务]
+  P --> T3[行情<br/>东方财富 / 腾讯]
+  P --> T4[MCP<br/>网页搜索与正文]
 ```
 
-此命令分批返回全本文字并演示重点回查，不调用模型账户。结果在 `storage/runs/m1-2-tools.json`；Python `/docs` 也提供底层工具验收接口。CLI 本身不代表模型已处理；网页真实研究的 Runner 会另行调用模型并记录实际处理覆盖。
+## 快速开始
 
-## 配置模型密钥
+已验证环境：Windows 11、Python 3.14、JDK 25、Node.js 24。启动脚本为 PowerShell。
 
-项目根目录 `.env` 中填写 `DEEPSEEK_API_KEY`；本次已创建该本地文件，已有文件不要覆盖。只有 Python 读取密钥，文件已被 Git 忽略。默认 `DEEPSEEK_BASE_URL=https://api.deepseek.com`、`DEEPSEEK_MODEL=deepseek-flash`；保存密钥后可直接重试。完整配置与排查见 [M1-1 说明](docs/m1-1-model.md)。
+1. 复制 `.env.example` 为 `.env`，填入模型密钥（推荐 DeepSeek，只填 `DEEPSEEK_API_KEY` 即可）。
+2. 启动三个服务（首次会自动建 Python 虚拟环境、安装依赖、构建 Java）：
 
-## 启动、检查、停止整套应用
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-app.ps1
+   ```
 
-在 PowerShell 中进入项目目录：
+3. 打开 http://127.0.0.1:5173/ ，填研究对象和问题后开始“真实研究”。“演示报告”不需要密钥、不产生费用。
+4. 停止：`.\scripts\stop-app.ps1`。离线测试：`.\apps\agent\.venv\Scripts\python.exe -m unittest discover -s apps\agent\tests -t apps\agent\tests`
 
-```powershell
-Set-Location 'D:\Learning\AI Lab\Vibe Coding\Path of Market市场之路'
-```
+## 模型支持
 
-启动（自动启动三个服务，检查成功后返回）：
+本项目的演示和全部真实验收都用 **DeepSeek API（`deepseek-flash`）** 完成，提示词也按它调试，**推荐使用 DeepSeek**。
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-app.ps1
-```
-
-打开 http://127.0.0.1:5173/ ，默认选择“真实研究”，填写问题后提交；它会调用模型与资料/行情工具并消耗模型额度。“模型思路”保留未检索资料的单次分析，“演示报告”可检查固定报告，不消耗模型额度。服务在后台运行，关闭启动终端后仍可使用；电脑重启后需要重新启动。
-
-| 服务 | 端口 | 分工 |
+| 服务商 | `.env` 配置 | 验证程度 |
 | --- | --- | --- |
-| React 网页 | 5173 | 输入与展示 |
-| Java 主后端 | 8080 | 接收请求并调用 Python |
-| Python 研究服务 | 8000 | 模型、动态工具循环、PDF 阅读、行情计算与进程内任务 |
+| DeepSeek | `DEEPSEEK_API_KEY`（默认） | 真实研究多家公司验收 |
+| OpenAI | `LLM_PROVIDER=openai`、`LLM_API_KEY`、`LLM_MODEL` | 仅本地模拟接口测试，未做真实调用 |
+| OpenAI 兼容服务（通义、Kimi、OpenRouter 等） | 再加 `LLM_BASE_URL` | 仅本地模拟接口测试 |
 
-检查三服务与完整基础链路（使用演示接口，不调用模型账户）：
+模型必须支持工具调用。只能经 OpenAI Responses 接口调工具的模型（如 GPT-6 Astra）和 Anthropic 原生接口暂不支持。换模型后输出格式与引用的稳定性可能不同。
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-app.ps1
-```
+## 当前局限
 
-停止统一入口启动的服务：
+- 只支持沪深 A 股；单用户、本机运行；启动脚本只在 Windows 验证过。
+- 第一次研究一家公司要整本读完多年年报，耗时约 20 分钟；同一家公司再研究会快很多。
+- 结构化数据来自 AKShare 抓取的东方财富网页，可能是更正后的数值，接口稳定性与使用条款以数据源为准。
+- 程序核对的是“数字出现在来源中”，不是独立审计；模型的推断仍需人工判断。
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-app.ps1
-```
+## 后续计划
 
-启动记录和日志在 `.runtime/`，不提交 Git。重复启动会检查现有服务；端口冲突时退出，不接管其他进程。启动失败会清理本次创建的服务并保留日志。详细环境要求、首次安装、错误排查和验收见 [第六步运行说明](docs/sixth-step.md)。
+- 近期：日常稳定性、写作阶段上下文压缩以降低成本、OpenAI Responses 适配。
+- 中期：报告导出、更好的复杂表格与图片阅读、行业研究。
+- 长期：板块追踪、持续变化对比、按个人研究风格发现线索。
 
-## 单个服务开发与检查
+## 开发文档
 
-需要分别看日志时，先停止统一入口的应用，再在三个终端分别运行 `scripts/start-agent.ps1`、`scripts/start-server.ps1`、`scripts/start-web.ps1`；在各终端按 Ctrl+C 停止。统一停止脚本不管理单独启动的服务。
+[当前进度](docs/current-state.md) · [任务板](docs/task-board.md) · [设计决策](docs/agent-design-decisions.md) · [架构](docs/architecture.md) · [开发历史](docs/history.md)。项目在 AI 编程助手协作下开发，协作约定见 [AGENTS.md](AGENTS.md)。展示素材可用 `scripts/capture-showcase.mjs` 与 `scripts/build-showcase-gifs.py` 重新生成。
 
-Python 自动管理虚拟环境与依赖，网页按锁文件安装依赖，Java 使用 Maven Wrapper 构建。本机已验证 Python 3.14.3、JDK 25.0.2、Node.js 24.13.1 / npm 11.8.0。演示模式无需模型密钥；真实研究和模型思路需本地 `.env` 配置，当前均无需数据库。
+## English
 
-离线测试（不调用模型，标准库 unittest）：
+Path of Market is an LLM research agent for China A-share companies. Given a company, a question and a cutoff date, it finds official annual reports, reads them in full, pulls structured financials (AKShare) and market data, and writes a sourced report with charts that you can keep questioning and revising. Demo results were produced with the DeepSeek API, which is the recommended provider; OpenAI and OpenAI-compatible endpoints are supported via `.env` but only tested against a local mock.
 
-```powershell
-.\apps\agent\.venv\Scripts\python.exe -m unittest discover -s apps\agent\tests -t apps\agent\tests
-```
+## 许可
 
-原有专项检查仍可使用：
-
-```powershell
-.\apps\agent\.venv\Scripts\python.exe .\scripts\check-agent.py
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-server.ps1
-.\apps\agent\.venv\Scripts\python.exe .\scripts\check-research-bridge.py --check-errors
-```
-
-网页构建（在 `apps/web` 目录）：`npm.cmd run build`。Python 接口文档：http://127.0.0.1:8000/docs 。各服务参数、接口和原有验收记录见第一步至第五步说明。
-
-## 第一版功能
-
-- 用户画像：投资风格、观察池、关注板块、风险偏好。
-- 板块地图：产业链、核心公司、关键指标、催化因素、主要风险。
-- 深研室：公司研究、行业研究、研报整合、反方检查。
-- 追猎者：追踪公司、板块、公告、新闻和市场变化。
-- 锐眼：识别和用户个人风格相关的重要变化。
-- 研究日志：保存报告、假设、来源和后续问题。
-
-## 推荐技术栈
-
-- 前端：React + Vite + TypeScript。
-- 主后端：Java + Spring Boot，负责接口、业务管理、数据库、用户画像和研究记录。
-- Agent 服务：Python + FastAPI，负责 LLM、RAG、文档解析、工具调用和 Agent 工作流。
-- 数据库：先用 SQLite 或 PostgreSQL，后续以 PostgreSQL 为主。
-- 大语言模型：先用 DeepSeek API，后续预留其他模型供应商。
-- 数据来源：系统自动发现的公开原始资料、补充上传、后续搜索与行情 Provider。
-
-以上是现有技术路线。当前采用独立 HTTP 模型适配与轻量 Runner，按 Pi 循环与 DeepSeek 官方工具协议实现；没有引入完整 Pi 或编排库。来源和采用理由见设计决策文档。
-
-## 应用分层
-
-- `apps/web`：前端操作台，负责页面、表单、报告展示和用户交互。
-- `apps/server`：Java 主后端，负责主要 API、数据库、权限、任务管理和调用 Agent 服务。
-- `apps/agent`：Python Agent 服务，负责深研室、锐眼、追猎者、RAG、数据工具和模型调用。
-
-## 项目协作记忆
-
-- `docs/architecture.md`：架构说明。
-- `docs/research-runtime-plan.md`：研究上下文、工具循环、记忆、长报告、表格图表与阶段安排。
-- `AGENTS.md`、`docs/agent-design-decisions.md`：核心机制参考成熟实践、JSONL 会话方向、统一资料通读和学习交接。
-- `docs/m1-2-tools.md`：自动查年报、六个工具、连续全本阅读与验收。
-- `docs/m1-3-agent.md`：M1-3 当时的动态研究循环（三个逻辑工具/七个底层工具）、股票行情、真实案例与学习入口。
-- `docs/m1-4-omens.md`：代码整理、token 优化、Skill 选择与 M1-4 预兆策略（该阶段六个逻辑工具/八个底层工具）、验收命令。
-- `docs/financial-research-skill.md`：原版金融Skill、原页视觉、财务底稿/同比和图表（该文档编写时五至六个逻辑工具）。
-- `docs/m2-2-user-memory.md`：单用户研究记忆、确认偏好/原话候选、工具/界面/验证及后续MCP和展示安排。
-- `docs/current-state.md`：当前进度（简要）；`docs/history.md`：此前的完整交付与验收记录。
-- `docs/task-board.md`：任务板。
-- `docs/dev-workflow.md`：AI 协作开发工作流。
-- `docs/handoff-prompt.md`：新聊天框交接提示词。
-- `docs/skill-plan.md`：项目开发 Skill 规划。
-- `docs/design-style.md`：前端设计风格。
-- `docs/report-omens.md`：深研室研究报告预兆设计。
-- `docs/first-step.md`：第一步的范围、数据格式和验收标准。
-- `docs/second-step.md`：Java 主后端的启动、健康检查和第二步验收结果。
-- `docs/third-step.md`：Java 调用 Python 的接口约定、配置、错误处理和第三步验收结果。
-- `docs/fourth-step.md`：React 深研室页面、本地任务预览、启动与第四步验收结果。
-- `docs/fifth-step.md`：网页报告调用、完整展示、等待/取消、错误和第五步验收结果。
-- `docs/sixth-step.md`：整套应用启动、停止、四项链路检查与错误排查。
-- `docs/m1-1-model.md`：模型密钥、真实模型调用、研究状态、证据边界与验收结果。
-- `docs/git-workflow.md`：本地版本保存与后续接入 GitHub。
-- `docs/data-sources.md`：候选数据来源与 Data Provider 边界。
-
-## 开发顺序
-
-1. **M0：完整应用骨架。** 先做 Python `/health` 和 `/research/mock`，再接 Java 和网页，跑通“输入 → Java → Python → 返回演示报告 → 网页展示”。
-2. **M1：真实研究 Agent v0。** 接入模型和少量真实资料工具，验证模型选择工具、读取结果、补查或结束的研究循环。
-3. **M2：研究积累与资料完善。** 保存报告、来源、运行记录和画像，完善资料检索与研究展示。
-4. **M3：特色功能。** 逐步实现板块地图、追猎者、锐眼和研究 Skill。
-
-2026-10-12 用户已确认恢复原来的最小闭环：先得到能打开、能输入、能展示演示报告的应用骨架，再接真实模型、资料工具和特色功能。应用架构和产品模块沿用原设计。
-
-2026-10-24 完成 M1-3 交接，并按用户要求提前接入股票日线、行情图和指标表。示例研究截止日为 2026-10-23。同日完成代码整理、token 优化与 M1-4（真实模型验收通过）。财务/业务表图、活动流、JSONL、任务接续及分节保存已接入；侧栏聊天基础版及2026-10-25上下文摘要已接入。统一资料通读与成熟实践依据见 `docs/agent-design-decisions.md`。
-
-每个里程碑继续拆成小任务；完成一个任务后核查结果、更新进度文档并提交 Git。具体状态以 `docs/current-state.md` 和 `docs/task-board.md` 为准。
-
-## Agent 的实现要求
-
-真实研究 Agent 必须由模型根据目标和工具结果决定研究动作。运行记录要能展示：实际调用的工具、资料来源、补查行为，以及完成或停止的原因。
-
-Mock 报告只用于验证服务接口，不代表已完成 Agent。不能把固定的提示词切换或定时查询本身当成真实 Agent 的验收结果。
-
-## 阅读长度与故障恢复
-
-`LLM_MAX_TOKENS` 继续控制简单“模型思路”报告；通读笔记使用独立的 `LLM_READING_MAX_TOKENS`（默认 3600，512–8192），无需修改现有密钥配置。真实研究的正文有独立预算。阅读碰到长度上限时缩小失败批次、从同一游标继续；成功范围不会重来，未读范围不会算作完成。总预算和主动停止仍保留。
-
-原页渲染使用 requirements 中的 pypdfium2 / Pillow，运行在独立子进程，不再要求另装 Poppler。安装新依赖后重启服务即可；`start-agent.ps1` 会检查依赖。最新检查命令与验收边界见稳定性审查。
+本项目代码采用 [MIT](LICENSE)。`third_party/` 下的第三方材料保留各自许可（Anthropic financial-services：Apache-2.0）。
