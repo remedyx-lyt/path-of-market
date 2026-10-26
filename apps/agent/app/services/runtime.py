@@ -31,10 +31,14 @@ class RunLimits:
 
     @classmethod
     def for_history(cls, years):
-        """容量按明确资料范围扩展，写作预留、逐批缓存与断点规则不变；不是无限重试。"""
+        """容量按明确资料范围扩展，写作预留、逐批缓存与断点规则不变；不是无限重试。
+
+        2026-10-26 用户决定调高 token 与时间：山东黄金首次5年研究（6份报告1,736页均无阅读缓存）完成共需约475万 token、约1,310秒，
+        原每年+70万（5年410万）在写作中途停止。现每年+120万（5年560万、10年1,160万），每年+300秒（5年2,100秒）。
+        """
         extra = max(0, years-2)
-        return replace(cls(), max_model_calls=144+32*extra, max_tokens=2_000_000+700_000*extra,
-                       max_seconds=1200+240*extra, max_steps=18+2*extra, max_visual_pages=max(12, years*16))
+        return replace(cls(), max_model_calls=144+32*extra, max_tokens=2_000_000+1_200_000*extra,
+                       max_seconds=1200+300*extra, max_steps=18+2*extra, max_visual_pages=max(12, years*16))
 
 
 class BudgetStop(Exception):

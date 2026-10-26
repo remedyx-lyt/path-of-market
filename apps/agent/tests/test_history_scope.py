@@ -38,6 +38,10 @@ class HistoryTests(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertGreater(ten.max_model_calls, five.max_model_calls)
         self.assertEqual(ten.report_reserve_calls, five.report_reserve_calls)
         self.assertEqual(ten.read_characters, five.read_characters)
+        # 山东黄金首次5年研究实测共需约475万 token、约1,310秒；预算须留余量
+        self.assertGreaterEqual(five.max_tokens, 5_500_000)
+        self.assertGreaterEqual(five.max_seconds, 2_000)
+        self.assertEqual(RunLimits.for_history(2).max_tokens, RunLimits().max_tokens)  # 两年研究不变
 
     def test_financial_chart_window_keeps_five_and_ten_years(self):
         from app.services.financial_data import build_financial_data
