@@ -5,7 +5,7 @@ import json
 
 from app.core.config import ModelServiceError
 from app.schemas.agent import ReadingNote
-from app.services.model_json import DerivedCache, ask_json, stable_key
+from app.services.model_json import DerivedCache, ask_json, provider_key, stable_key
 from app.services.runtime import now
 from app.tools.contracts import ToolError
 from app.tools.public_web import PublicSearchArguments, WebReadArguments, CHUNK_SIZE
@@ -101,7 +101,7 @@ class WebMixin:
             task = {"sourceId": sid, "title": snapshot["title"], "unit": "segment", "offset": start,
                     "pages": [{"page": segment, "text": snapshot["text"][start:end]}]}
             messages = [{"role": "system", "content": WEB_READ_SYSTEM}, {"role": "user", "content": json.dumps(task, ensure_ascii=False)}]
-            key = stable_key({"messages": messages, "sha256": snapshot["sha256"], "model": self.settings.model, "version": 1})
+            key = stable_key({"messages": messages, "sha256": snapshot["sha256"], "model": self.settings.model, "version": 1, **provider_key(self.settings)})
 
             def parse(value):
                 note = ReadingNote.model_validate_json(value) if isinstance(value, str) else ReadingNote.model_validate(value)

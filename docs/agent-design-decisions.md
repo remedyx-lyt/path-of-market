@@ -217,3 +217,12 @@ Java `ResearchMemoryStore`保存在已忽略的`sessions/memory/user.json`，临
 - 引用：`check_citation` 只核对来源是否本次取得并读完；`loosen_page` 把对不上的页码去掉、保留来源，用于正文、定性图、数据表、分节写作和报告追问。不存在或未读完的来源仍不通过。表格数字无页码时 `check_table` 在整份资料或结构化数值内核对，核对不上的格子照旧标 `*`，不删表。
 
 追加（同日）：分业务收入改用 AKShare `stock_zygc_em`（主营构成，按行业/产品/地区的收入、成本、毛利率；1.19.3 实测列：报告日期、分类类型、主营构成、主营收入、毛利率等）。该接口没有披露日期，套用同一报告期利润表的 `NOTICE_DATE` 过滤研究截止日；只有年报与中报期。“其中:”开头是上一项的子项，计入会重复（山东黄金实测行业合计达营收141%），程序剔除。某维度某期有结构化数据时整期只用它，不与年报抽取的分项混合（两边分项名称不同，无法逐项对齐）；主营构成取不到不影响三大报表，记缺口后仍走年报抽取。
+
+## 2026-10-26：多服务商模型接口（最小版）
+
+用户要求：先做出“兼容其他厂商”的能力，用户只改 `.env` 即可切换；日常仍用 DeepSeek，GitHub 上说明演示基于 DeepSeek 并推荐它。
+
+- 来源核对：Pi `packages/ai`（`providers/compat-schema.ts` 的 `OpenAICompletionsCompatSchema`：`maxTokensField`、`thinkingFormat`、`supportsReasoningEffort`、`supportsUsageInStreaming` 等；`providers/deepseek.ts` 走 openai-completions，`providers/openai.ts` 走 openai-responses）；OpenAI [迁移指南](https://developers.openai.com/api/docs/guides/migrate-to-responses)与[最新模型说明](https://developers.openai.com/api/docs/guides/latest-model)：Chat Completions 继续支持，但自 GPT-5.4 起其中调工具要求 `reasoning_effort` 为 `none`，GPT-6 Astra / GPT-6.1 Sol 调工具必须用 Responses；`max_tokens` 已弃用、新模型用 `max_completion_tokens`；缓存命中在 `usage.prompt_tokens_details.cached_tokens`。
+- 采用的机制：照 Pi 的“同一 Chat Completions 客户端 + 每家服务商一份差异档案”。`core/config.py` 的 `PROVIDERS`（deepseek / openai / openai-compatible）定义默认地址、输出上限参数名、思考参数写法与视觉名单；`model_client.provider_options` 按档案发参数，`usage_counts` 把 OpenAI 缓存字段换算成统一的命中/未命中。研究流程、工具与会话协议不变。
+- 业务适配：DeepSeek 请求参数与阅读缓存键完全不变（缓存键只对非 DeepSeek 加服务商与地址，避免同名模型混用笔记）；报告 `run.provider` 记录服务商；接续沿用检查点里的模型与地址校验。
+- 未做：Responses 适配器（OpenAI 旗舰模型推理+调工具）、Anthropic 原生接口、真实 OpenAI 调用（用户暂无密钥）。只做了本地模拟服务的请求/工具调用/流式往返与 DeepSeek 真实短调用；其他服务商的实际效果与提示词适配未验证。

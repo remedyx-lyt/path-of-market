@@ -191,7 +191,7 @@ class EvidenceMixin:
             raise ToolError("AFTER_RESEARCH_CUTOFF", "资料晚于研究截止日。")
         if self.uses_real_provider and self.settings.model not in self.settings.vision_models:
             raise ToolError(
-                "VISION_MODEL_UNSUPPORTED", "当前配置模型未声明图片能力，请使用支持视觉输入的模型或配置 DEEPSEEK_VISION_MODELS。"
+                "VISION_MODEL_UNSUPPORTED", "当前配置模型未声明图片能力，请使用支持视觉输入的模型或在 .env 配置 LLM_VISION_MODELS。"
             )
         existing = {(r["sourceId"], p) for r in self.visual_readings for p in r["pages"]}
         if len(existing | {(args.document_id, p) for p in args.pages}) > self.limits.max_visual_pages:

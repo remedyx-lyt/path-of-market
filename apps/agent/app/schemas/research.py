@@ -109,7 +109,7 @@ class ModelRun(BaseModel):
     started_at: str = Field(alias="startedAt")
     finished_at: str = Field(alias="finishedAt")
     stop_reason: Literal["model_response_received"] = Field(default="model_response_received", alias="stopReason")
-    provider: Literal["deepseek-compatible"] = "deepseek-compatible"
+    provider: str = "deepseek"
     model: str
     usage: dict[str, int]
 

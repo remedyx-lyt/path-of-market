@@ -158,7 +158,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   AGENT_ERROR: '研究服务暂时无法完成请求，请稍后重试。',
   AGENT_INVALID_RESPONSE: '研究服务返回了无法识别的结果，请稍后重试。',
   INVALID_JSON: '请求内容无法解析，请重新填写后重试。',
-  MODEL_NOT_CONFIGURED: '请在项目根目录 .env 的 DEEPSEEK_API_KEY= 后填写密钥并保存，然后重试。',
+  MODEL_NOT_CONFIGURED: '请在项目根目录 .env 填写模型密钥（LLM_API_KEY，或 DeepSeek 的 DEEPSEEK_API_KEY）并保存，然后重试。',
   MODEL_CONFIG_ERROR: '模型配置无效，请检查 .env 的接口地址、模型名称和等待上限。',
   MODEL_AUTH_FAILED: '模型密钥验证失败，请检查密钥和账户权限。',
   MODEL_BALANCE_INSUFFICIENT: '模型账户余额或额度不足，请到供应商平台检查。',

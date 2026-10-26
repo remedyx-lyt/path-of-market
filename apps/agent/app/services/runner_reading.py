@@ -10,7 +10,7 @@ import json
 from app.core.agent_prompts import LEGACY_READ_SYSTEM, READ_SYSTEM
 from app.core.config import ModelServiceError
 from app.schemas.agent import AgentReadArguments, ReadingNote
-from app.services.model_json import DerivedCache, ask_json, stable_key, validation_problems
+from app.services.model_json import DerivedCache, ask_json, provider_key, stable_key, validation_problems
 from app.services.runtime import now
 from app.services.reading_coverage import reading_complete, update_reading_complete
 from app.tools.contracts import ToolError
@@ -200,7 +200,7 @@ class ReadingMixin:
         reading_task = {"sourceId": identifier, "title": metadata["title"], "pages": batch["pages"]}
         messages = [{"role": "system", "content": READ_SYSTEM}, {"role": "user", "content": json.dumps(reading_task, ensure_ascii=False)}]
         # 派生阅读缓存，不是会话持久化：须命中同一原文件、同一批原文、同一模型与提示版本。
-        key = stable_key({"messages": messages, "model": self.settings.model, "sha256": file_sha256, "version": READING_VERSION})
+        key = stable_key({"messages": messages, "model": self.settings.model, "sha256": file_sha256, "version": READING_VERSION, **provider_key(self.settings)})
 
         def parse(content):
             note = ReadingNote.model_validate_json(content) if isinstance(content, str) else ReadingNote.model_validate(content)
@@ -219,6 +219,7 @@ class ReadingMixin:
                         {"role": "user", "content": json.dumps(legacy_task, ensure_ascii=False)},
                     ],
                     "model": self.settings.model,
+                    **provider_key(self.settings),
                     "sha256": file_sha256,
                 }
             )

@@ -55,6 +55,11 @@ def escape_inner_quotes(raw):
     return "".join(out)
 
 
+def provider_key(settings):
+    """阅读缓存键里的服务商：DeepSeek 不加（保持已有缓存可用），其他服务商加上，防止同名模型混用笔记。"""
+    return {} if settings.provider == "deepseek" else {"provider": settings.provider, "baseUrl": settings.base_url}
+
+
 def stable_key(payload: Any) -> str:
     """对任意 JSON 结构计算稳定哈希；键排序，保证同一输入得到同一缓存文件名。"""
     return sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()

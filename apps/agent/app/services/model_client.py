@@ -15,10 +15,27 @@ USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens", "prompt_ca
 
 
 def usage_counts(usage) -> dict:
-    """只保留供应商返回的非负整数用量字段；其他内容不进入任务记录。"""
+    """只保留供应商返回的非负整数用量字段；其他内容不进入任务记录。
+
+    缓存命中统一记成 DeepSeek 的扁平字段：OpenAI 报在 usage.prompt_tokens_details.cached_tokens，换算成命中/未命中。
+    """
     if not isinstance(usage, dict):
         return {}
-    return {name: value for name in USAGE_FIELDS if type(value := usage.get(name)) is int and value >= 0}
+    counts = {name: value for name in USAGE_FIELDS if type(value := usage.get(name)) is int and value >= 0}
+    details = usage.get("prompt_tokens_details")
+    cached = details.get("cached_tokens") if isinstance(details, dict) else None
+    if "prompt_cache_hit_tokens" not in counts and type(cached) is int and 0 <= cached <= counts.get("prompt_tokens", -1):
+        counts.update(prompt_cache_hit_tokens=cached, prompt_cache_miss_tokens=counts["prompt_tokens"] - cached)
+    return counts
+
+
+def provider_options(settings: ModelSettings) -> dict:
+    """服务商特有的请求参数（见 config.PROVIDERS）。DeepSeek 关闭思考模式；OpenAI 新模型调工具需 reasoning_effort=none。"""
+    if settings.reasoning_mode == "deepseek":
+        return {"thinking": {"type": "disabled"}}
+    if settings.reasoning_mode == "reasoning_effort" and settings.reasoning_effort:
+        return {"reasoning_effort": settings.reasoning_effort}
+    return {}
 
 
 def _request_payload(settings: ModelSettings, payload: dict) -> dict:
@@ -191,8 +208,8 @@ async def complete_turn(
         "model": settings.model,
         "messages": messages,
         "stream": False,
-        "thinking": {"type": "disabled"},
-        "max_tokens": max_tokens or settings.max_tokens,
+        **provider_options(settings),
+        settings.max_tokens_field: max_tokens or settings.max_tokens,
     }
     if tools:
         payload.update(tools=tools, tool_choice=tool_choice)

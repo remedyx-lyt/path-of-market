@@ -760,6 +760,7 @@ class ReportMixin:
                 "startedAt": self.job.started_at,
                 "finishedAt": now(),
                 "stopReason": reason,
+                "provider": self.settings.provider,
                 "model": self.settings.model,
                 "modelCalls": self.job.model_calls,
                 "usage": usage,

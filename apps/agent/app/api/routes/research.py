@@ -49,6 +49,7 @@ async def research_model(request: ModelResearchRequest):
                 states=states,
                 started_at=started_at,
                 finished_at=datetime.now(timezone.utc).isoformat(),
+                provider=settings.provider,
                 model=settings.model,
                 usage=usage,
             ),
