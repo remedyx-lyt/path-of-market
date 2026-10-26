@@ -458,7 +458,8 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
     # ---- 上下文组装 -----------------------------------------------------
 
     def conflicts(self):
-        return [g for g in dict.fromkeys(self.financial_gaps + self.business_gaps + self.financial_data()["gaps"]) if "冲突" in g]
+        # 用底稿整理后的缺口：结构化数据（AKShare）已覆盖的年报取数提示不再算作“未解决的来源冲突”。
+        return [g for g in dict.fromkeys(self.financial_data()["gaps"] + self.business_data()["gaps"]) if "冲突" in g]
 
     def tool_view(self, message):
         """取工具消息的投影；同一条消息只解析一次（内容变化时重建）。"""

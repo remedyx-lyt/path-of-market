@@ -135,6 +135,9 @@ class Runner(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         product = next(d for d in business["datasets"] if d["id"] == "product-annual")
         self.assertNotIn("其他名称", {i["label"] for i in product["rows"][-1]["items"]})
         self.assertFalse(any("未进入业务图" in g or g.startswith("年报取数说明") for g in business["gaps"]))
+        # 宁德时代实测：年报取数说明里含“冲突”二字，曾被列为“未解决的来源冲突”
+        runner.business_gaps.append("年报取数说明：本页声明单位为千元，与单位要求冲突")
+        self.assertEqual(runner.conflicts(), [])
 
     async def test_database_failure_is_a_gap_not_a_stop(self):
         class Broken:
