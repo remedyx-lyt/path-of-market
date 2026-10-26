@@ -22,6 +22,18 @@ const shot = (name) => page.screenshot({ path: path.join(out, name) })
 await open(ZIJIN)
 await ensure(null, /展开研究设置/)
 await shot('01-workbench.png')
+// 09 预兆：设置栏的四个预兆 + 报告里的预兆覆盖（两张局部图，由 build-showcase-gifs.py 拼成 09-omens.png）
+if (await button(/展开研究设置/).isVisible().catch(() => false)) { await button(/展开研究设置/).click(); await page.waitForTimeout(800) }
+if (!(await page.getByText('研究预兆').first().isVisible().catch(() => false))) { await page.getByText(/研究偏好与预兆/).first().click(); await page.waitForTimeout(1000) }
+const omenGroup = page.getByText('研究预兆').filter({ hasText: '可多选' }).first().locator('xpath=ancestor::fieldset[1]')
+await omenGroup.evaluate((el) => el.scrollIntoView({ block: 'center' })); await page.waitForTimeout(600)
+await omenGroup.screenshot({ path: path.join(frames || out, 'omen-picker.png') })
+await ensure(null, /收起研究设置/)
+const coverage = page.locator('summary', { hasText: '研究预兆覆盖' }).first()
+await coverage.evaluate((el) => { el.parentElement.open = true; el.parentElement.scrollIntoView({ block: 'start' }) }); await page.waitForTimeout(800)
+await coverage.locator('xpath=..').screenshot({ path: path.join(frames || out, 'omen-coverage.png') })
+await coverage.evaluate((el) => { el.parentElement.open = false })
+await page.evaluate(() => window.scrollTo(0, 0))
 // 05 对话：放大对话，显示真实补查回答与“只读到部分正文”的如实说明
 await ensure(null, /收起研究设置/)
 await button(/放大对话/).click(); await page.waitForTimeout(1200)
