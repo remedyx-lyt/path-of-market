@@ -6,6 +6,25 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 > 报告区分事实、推断和缺口，数字可追溯到来源，但不等于独立审计。
 
+## Agent 实现一览
+
+不依赖 LangChain 等编排框架，核心循环、上下文、会话与校验均为自行实现，机制参考 [Pi](https://github.com/earendil-works/pi) 与 DeepSeek 官方工具协议（依据见[设计决策](docs/agent-design-decisions.md)）。
+
+| 机制 | 做法 | 代码 |
+| --- | --- | --- |
+| Agent 循环 | 模型选工具 → 程序校验并执行 → 结果回传 → 模型决定补查还是写作；11 个工具，一轮可同时请求多个 | [agent_runner.py](apps/agent/app/services/agent_runner.py) |
+| 长文档阅读 | 整本分批读并记录逐页覆盖；输出超限自动缩批、从断点续读；扫描页用视觉模型补读 | [runner_reading.py](apps/agent/app/services/runner_reading.py) |
+| 上下文工程 | 完整工具结果存档，每轮只投影要点；接近上限时摘要较早历史，原始证据可回查；写作复用研究前缀以命中缓存 | [context_compaction.py](apps/agent/app/services/context_compaction.py) |
+| 会话与恢复 | 消息逐条追加到 JSONL（`id`/`parentId` 分支）并写执行检查点；中断或预算用尽后从保存处继续，已读资料不重读 | [session_recorder.py](apps/agent/app/services/session_recorder.py) · [research_recovery.py](apps/agent/app/services/research_recovery.py) · [SessionStore.java](apps/server/src/main/java/com/pathofmarket/server/session/SessionStore.java) |
+| Harness 校验 | 提示词给软约束，程序硬核对：来源须已读、表格数字逐格对原文、图表 ID、预兆章节、截止日；格式问题自动整理，真实性严格把关 | [runner_report.py](apps/agent/app/services/runner_report.py) |
+| 长报告写作 | 大纲 → 逐节生成并保存 → 数据表 → 复核局部补丁；失败只重试失败的那一节 | [runner_writing.py](apps/agent/app/services/runner_writing.py) |
+| 预兆与方法 | 预兆规格改变研究计划、加载的金融 Skill、必写章节与自检；方法按需读取 | [omens.py](apps/agent/app/core/omens.py) · [research_skills.py](apps/agent/app/core/research_skills.py) |
+| 数据工具 | 巨潮年报、AKShare 结构化财务、行情、MCP 网页搜索与正文 | [financial_db.py](apps/agent/app/tools/financial_db.py) · [public_web.py](apps/agent/app/tools/public_web.py) |
+| 预算与多模型 | 调用 / token / 时间上限并为写作预留；服务商差异档案，`.env` 切换 DeepSeek / OpenAI 兼容接口 | [runtime.py](apps/agent/app/services/runtime.py) · [config.py](apps/agent/app/core/config.py) |
+| 记忆 | 跨研究的经历与主题观察；偏好须用户确认才生效 | [user_memory.py](apps/agent/app/services/user_memory.py) · [ResearchMemoryStore.java](apps/server/src/main/java/com/pathofmarket/server/memory/ResearchMemoryStore.java) |
+
+207 项离线测试（模型用脚本化假实现）+ 多家公司真实运行验收。
+
 ![浏览一份真实报告：结论、财务图、业务结构](docs/assets/showcase/demo-report.gif)
 
 <sub>真实运行结果（DeepSeek `deepseek-flash`），宁德时代 2021–2025 五年研究，截止 2026-10-23。动图为浏览已完成报告的录制。</sub>
@@ -87,17 +106,6 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 | **研究日志** | 保存报告、假设、来源和后续问题 | 部分实现：会话、报告版本与过程可回放 |
 
 完整的研究闭环：建立画像 → 深研室研究公司或板块 → 报告存入研究日志 → 追猎者检查后续更新 → 锐眼判断哪些更新对你更重要 → 回到深研室继续研究。产品规划见 [product-plan.md](docs/product-plan.md)。
-
-## Agent 是怎么做的
-
-- **工具循环**：模型根据目标和工具结果决定下一步（11 个工具：找报告、读报告（通读/按页/关键词回查）、行情、看 PDF 原页、正文取数、MCP 网页搜索、网页通读、研究记录回查、记忆回查、偏好建议、读研究方法），程序校验参数并执行，结果回传后模型再决定补查还是写作。循环参考 [Pi](https://github.com/earendil-works/pi) 与 DeepSeek 工具协议实现，没有引入编排框架。
-- **上下文管理**：完整工具结果留在记录里，每轮只投影有限要点；接近上限时摘要较早历史，原始证据可按需回查。
-- **会话与恢复**：消息逐条写入 JSONL（`id`/`parentId` 分支），加执行检查点；预算用尽或中断后可从保存处继续，已读资料不重读。
-- **两层约束（harness）**：提示词规定格式与边界；程序硬性核对引用来源、阅读覆盖、表格数字、图表 ID、预兆章节与截止日。格式类问题自动整理，真实性问题严格把关。
-- **研究方法**：按问题和所选预兆加载 [Anthropic financial-services](third_party/anthropic-financial-services) 原版金融研究 Skill（Apache-2.0，保留许可）形成研究计划。
-- **预算**：调用次数、token、时间都有上限，按研究年限放宽，并为写作预留空间。
-
-设计依据与来源见 [设计决策](docs/agent-design-decisions.md)。
 
 ## 架构
 
