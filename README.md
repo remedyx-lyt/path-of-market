@@ -1,10 +1,10 @@
 # Path of Market（市场之路）
 
-**一个带点游戏味的个人财经研究工作台。** 名字和玩法灵感来自《流放之路》（Path of Exile）：研究像一场远征，你可以给报告挂上“预兆”改变研究视角，工作台里的各个板块也以游戏里的职业和系统命名。
+Path of Market（市场之路）是一个基于大模型的个人财经研究工作台，内部包含研究 Agent。它帮助用户持续积累资料、比较变化，从不同视角展开有来源的分析，并发现和自己研究风格相关的线索。它不是自动交易系统，也不是荐股系统。
 
 当前版本完成的是核心板块 **深研室**：一个研究 A 股公司的大模型 Agent。输入公司、研究问题和截止日期，它自己去找年报、整本读完、取结构化财务数据和行情，写出带来源和图表的研究报告；之后可以围绕报告继续追问、补查和修订。
 
-> 不是荐股或自动交易工具。报告区分事实、推断和缺口，数字可追溯到来源，但不等于独立审计。
+> 报告区分事实、推断和缺口，数字可追溯到来源，但不等于独立审计。
 
 ![浏览一份真实报告：结论、财务图、业务结构](docs/assets/showcase/demo-report.gif)
 
@@ -86,15 +86,6 @@
 | **用户画像** | 投资风格、关注板块、观察池、风险偏好 | 部分实现：研究记忆与用户确认的偏好 |
 | **研究日志** | 保存报告、假设、来源和后续问题 | 部分实现：会话、报告版本与过程可回放 |
 
-深研室内部也按游戏职业设想了分工，目前由同一个 Agent 循环承担，预兆正是这些角色视角的第一步落地：
-
-| 角色 | 作用 |
-| --- | --- |
-| 秘术师 | 公司与行业的系统性深度研究 |
-| 编年者 | 整理研报、财报、公告、新闻与时间线 |
-| 审判官 | 寻找风险、矛盾和反方论点 |
-| 探矿者 | 从资料中提取值得继续研究的线索 |
-
 完整的研究闭环：建立画像 → 深研室研究公司或板块 → 报告存入研究日志 → 追猎者检查后续更新 → 锐眼判断哪些更新对你更重要 → 回到深研室继续研究。产品规划见 [product-plan.md](docs/product-plan.md)。
 
 ## Agent 是怎么做的
@@ -161,7 +152,7 @@ flowchart LR
 
 - 近期：深研室日常稳定性、写作阶段上下文压缩以降低成本、行业研究、OpenAI Responses 适配。
 - 中期：**追猎者**（关注列表的公告/财报/新闻追踪，先手动后定时）、报告导出、更好的复杂表格与图片阅读。
-- 长期：**锐眼**（按个人研究风格筛选变化与线索）、**板块地图**、更多预兆与深研室角色分工。
+- 长期：**锐眼**（按个人研究风格筛选变化与线索）、**板块地图**、更多预兆。
 
 ## 开发文档
 
@@ -169,10 +160,10 @@ flowchart LR
 
 ## English
 
-Path of Market is a game-flavored personal research workbench for China A-share investing, named after and inspired by *Path of Exile*. Its first module, the Deep Research room, is an LLM agent: given a company, a question and a cutoff date, it finds official annual reports, reads them in full, pulls structured financials (AKShare) and market data, and writes a sourced report with charts that you can keep questioning and revising. Its signature feature is **omens**: four selectable research lenses (deep understanding, historical parallels, future change, risks and counter-arguments) that change the plan, methods, required chapters and self-checks of a report. Planned modules include Pathfinder (tracking changes) and Deadeye (personalized signals). Demo results were produced with the DeepSeek API, the recommended provider; OpenAI and OpenAI-compatible endpoints are supported via `.env` but only tested against a local mock.
+Path of Market is an LLM-based personal research workbench for China A-share investing that helps users accumulate sources, compare changes, analyze from different perspectives with citations, and spot leads that fit their own research style. It is not a trading or stock-picking system. Its first module, the Deep Research room, is an LLM agent: given a company, a question and a cutoff date, it finds official annual reports, reads them in full, pulls structured financials (AKShare) and market data, and writes a sourced report with charts that you can keep questioning and revising. Its signature feature is **omens**: four selectable research lenses (deep understanding, historical parallels, future change, risks and counter-arguments) that change the plan, methods, required chapters and self-checks of a report. Planned modules include Pathfinder (tracking changes) and Deadeye (personalized signals). Demo results were produced with the DeepSeek API, the recommended provider; OpenAI and OpenAI-compatible endpoints are supported via `.env` but only tested against a local mock.
 
 ## 许可
 
 本项目代码采用 [MIT](LICENSE)。`third_party/` 下的第三方材料保留各自许可（Anthropic financial-services：Apache-2.0）。
 
-“流放之路 / Path of Exile”及相关名称属于 Grinding Gear Games。本项目只借用其意象作为个人作品的命名灵感，与其无关联、未获其认可。
+“预兆”的意象借用自《流放之路 2》，“流放之路 / Path of Exile”及相关名称属于 Grinding Gear Games；本项目与其无关联、未获其认可。
