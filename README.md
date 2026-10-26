@@ -6,6 +6,10 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 > 报告区分事实、推断和缺口，数字可追溯到来源，但不等于独立审计。
 
+![浏览一份真实报告：结论、财务图、业务结构](docs/assets/showcase/demo-report.gif)
+
+<sub>真实运行结果（DeepSeek `deepseek-flash`），宁德时代 2021–2025 五年研究，截止 2026-10-23。动图为浏览已完成报告的录制。</sub>
+
 ## Agent 实现一览
 
 不依赖 LangChain 等编排框架，核心循环、上下文、会话与校验均为自行实现，机制参考 [Pi](https://github.com/earendil-works/pi) 与 DeepSeek 官方工具协议（依据见[设计决策](docs/agent-design-decisions.md)）。
@@ -24,10 +28,6 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 | 记忆 | 跨研究的经历与主题观察；偏好须用户确认才生效 | [user_memory.py](apps/agent/app/services/user_memory.py) · [ResearchMemoryStore.java](apps/server/src/main/java/com/pathofmarket/server/memory/ResearchMemoryStore.java) |
 
 207 项离线测试（模型用脚本化假实现）+ 多家公司真实运行验收。
-
-![浏览一份真实报告：结论、财务图、业务结构](docs/assets/showcase/demo-report.gif)
-
-<sub>真实运行结果（DeepSeek `deepseek-flash`），宁德时代 2021–2025 五年研究，截止 2026-10-23。动图为浏览已完成报告的录制。</sub>
 
 ## 特色：四个研究预兆
 
