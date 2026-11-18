@@ -1,5 +1,6 @@
 """在一次性数据副本上验收迁移前的公开 API。运行方式见 docs/backend-compatibility.md。"""
 from contextlib import contextmanager, ExitStack
+import argparse
 import os
 from pathlib import Path
 import shutil
@@ -79,7 +80,13 @@ def model_calls(directory):
     return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
 
-def check():
+def check_original_history(fixtures, directory):
+    immutable_files = [*fixtures.glob("sessions/*.jsonl"), *fixtures.glob("evidence/run-checkpoints/*.json")]
+    for source in immutable_files:
+        assert (directory / source.relative_to(fixtures)).read_bytes() == source.read_bytes(), source.name
+
+
+def check(*, storage_only=False):
     if not __debug__:
         raise SystemExit("请使用普通 Python 模式运行，检查依赖 assert。")
     if not JAR.is_file() or not shutil.which("java"):
@@ -88,6 +95,12 @@ def check():
         directory = Path(temp)
         fixtures = TESTS / "fixtures"
         shutil.copytree(fixtures, directory, dirs_exist_ok=True)
+        if storage_only:
+            from backend_contract.storage_comparison import compare_storage
+            compare_storage(directory, reference_backend)
+            assert "reading" not in model_calls(directory)
+            check_original_history(fixtures, directory)
+            return
         with reference_backend(directory) as api:
             check_first_start(api)
             assert model_calls(directory) == ["analysis"]
@@ -113,11 +126,11 @@ def check():
             assert turn["requestId"] == body["requestId"]
             assert api.request("GET", f"{JOBS}/{turn['runId']}")["status"] == "completed"
             assert model_calls(directory) == before
-        immutable_files = [*fixtures.glob("sessions/*.jsonl"), *fixtures.glob("evidence/run-checkpoints/*.json")]
-        for source in immutable_files:
-            assert (directory / source.relative_to(fixtures)).read_bytes() == source.read_bytes(), source.name
+        check_original_history(fixtures, directory)
         print("PASS 再次重启后重发不调用模型，旧会话逐字节一致；12 个公开 HTTP 操作通过。")
 
 
 if __name__ == "__main__":
-    check()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--compare-storage", action="store_true", help="在同一副本上交替使用 Java 与 Python 存储")
+    check(storage_only=parser.parse_args().compare_storage)
