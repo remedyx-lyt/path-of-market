@@ -1,6 +1,6 @@
-"""在一次性数据副本上验收迁移前的公开 API。运行方式见 docs/backend-compatibility.md。"""
-from contextlib import contextmanager, ExitStack
-import argparse
+"""在一次性数据副本上验收单进程 Python 后端的公开 API。运行方式见 docs/backend-compatibility.md。"""
+from contextlib import contextmanager
+from backend_contract.qa_server import start_python
 import os
 from pathlib import Path
 import shutil
@@ -18,14 +18,12 @@ from backend_contract.scenarios import (
 
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "scripts/backend_contract"
-JAR = ROOT / "apps/server/target/path-of-market-server.jar"
 
 
 @contextmanager
 def process(args, directory, name, env):
     with (directory / f"{name}.log").open("wb") as log:
-        child = subprocess.Popen(args, cwd=directory, env=env, stdout=log, stderr=subprocess.STDOUT,
-                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        child = start_python(args, cwd=directory, env=env, stdout=log, stderr=subprocess.STDOUT)
         try:
             yield child
         finally:
@@ -50,28 +48,20 @@ def wait_ready(child, api, path):
 
 
 @contextmanager
-def reference_backend(directory):
-    with socket.socket() as a, socket.socket() as b:
-        a.bind(("127.0.0.1", 0))
-        b.bind(("127.0.0.1", 0))
-        port, agent_port = a.getsockname()[1], b.getsockname()[1]
+def backend(directory):
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
     api = Api(f"http://127.0.0.1:{port}")
-    agent = Api(f"http://127.0.0.1:{agent_port}")
-    env = {**os.environ, "SESSION_STORE_URL": api.base + "/internal/sessions",
-           "NO_PROXY": "localhost,127.0.0.1", "PYTHONUTF8": "1"}
-    java = [shutil.which("java"), "-Dfile.encoding=UTF-8", "-jar", str(JAR), f"--server.port={port}",
-            f"--agent.base-url={agent.base}", f"--sessions.dir={directory / 'sessions'}"]
-    with ExitStack() as stack:
+    env = {**os.environ, "SESSIONS_DIR": str(directory / "sessions"), "PYTHONUTF8": "1",
+           "NO_PROXY": "localhost,127.0.0.1"}
+    with process([str(TESTS / "fixture_agent.py"), str(port), str(directory)],
+                 directory, "backend", env) as child:
         try:
-            worker = stack.enter_context(process([sys.executable, str(TESTS / "legacy_agent.py"), str(agent_port),
-                                                  str(directory)], directory, "agent", env))
-            wait_ready(worker, agent, "/health")
-            server = stack.enter_context(process(java, directory, "java", env))
-            wait_ready(server, api, "/api/health")
+            wait_ready(child, api, "/api/health")
             yield api
         except Exception:
-            for log in directory.glob("*.log"):
-                print(log.name, log.read_bytes()[-3000:].decode("utf-8", errors="replace"), file=sys.stderr)
+            print((directory / "backend.log").read_bytes()[-3000:].decode("utf-8", errors="replace"), file=sys.stderr)
             raise
 
 
@@ -86,29 +76,21 @@ def check_original_history(fixtures, directory):
         assert (directory / source.relative_to(fixtures)).read_bytes() == source.read_bytes(), source.name
 
 
-def check(*, storage_only=False):
+def check():
     if not __debug__:
         raise SystemExit("请使用普通 Python 模式运行，检查依赖 assert。")
-    if not JAR.is_file() or not shutil.which("java"):
-        raise SystemExit("需要已构建的 Java JAR 和 java，请先按 docs/backend-compatibility.md 构建。")
     with TemporaryDirectory(prefix="pom-contract-") as temp:
         directory = Path(temp)
         fixtures = TESTS / "fixtures"
         shutil.copytree(fixtures, directory, dirs_exist_ok=True)
-        if storage_only:
-            from backend_contract.storage_comparison import compare_storage
-            compare_storage(directory, reference_backend)
-            assert "reading" not in model_calls(directory)
-            check_original_history(fixtures, directory)
-            return
-        with reference_backend(directory) as api:
+        with backend(directory) as api:
             check_first_start(api)
             assert model_calls(directory) == ["analysis"]
             task, coverage = start_and_cancel(api)
             assert model_calls(directory).count("reading") > 0
             print("PASS 旧会话与记忆、报告接口、错误格式、创建、互斥、取消", flush=True)
         before = model_calls(directory)
-        with reference_backend(directory) as api:
+        with backend(directory) as api:
             check_saved_history(api)
             profile = api.request("GET", MEMORY)
             assert profile["revision"] == 4 and profile["enabled"] is False
@@ -120,7 +102,7 @@ def check(*, storage_only=False):
             assert "reading" not in new_calls and new_calls.count("discussion") == 1
             print("PASS 冷启动、检查点接续、已读资料零次重读、重复追问只执行一次", flush=True)
         before = model_calls(directory)
-        with reference_backend(directory) as api:
+        with backend(directory) as api:
             assert api.request("POST", path, 409, body)["error"]["code"] == "RESEARCH_NOT_RESUMABLE"
             turn, = api.request("GET", path.removesuffix("/chat") + "/discussion")["turns"]
             assert turn["requestId"] == body["requestId"]
@@ -131,6 +113,4 @@ def check(*, storage_only=False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--compare-storage", action="store_true", help="在同一副本上交替使用 Java 与 Python 存储")
-    check(storage_only=parser.parse_args().compare_storage)
+    check()

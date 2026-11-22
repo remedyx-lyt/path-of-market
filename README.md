@@ -19,13 +19,13 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 | Agent 循环 | 模型选工具 → 程序校验并执行 → 结果回传 → 模型决定补查还是写作；11 个工具，一轮可同时请求多个 | [agent_runner.py](apps/agent/app/services/agent_runner.py) |
 | 长文档阅读 | 整本分批读并记录逐页覆盖；输出超限自动缩批、从断点续读；扫描页用视觉模型补读 | [runner_reading.py](apps/agent/app/services/runner_reading.py) |
 | 上下文工程 | 完整工具结果存档，每轮只投影要点；接近上限时摘要较早历史，原始证据可回查；写作复用研究前缀以命中缓存 | [context_compaction.py](apps/agent/app/services/context_compaction.py) |
-| 会话与恢复 | 消息逐条追加到 JSONL（`id`/`parentId` 分支）并写执行检查点；中断或预算用尽后从保存处继续，已读资料不重读 | [session_recorder.py](apps/agent/app/services/session_recorder.py) · [research_recovery.py](apps/agent/app/services/research_recovery.py) · [SessionStore.java](apps/server/src/main/java/com/pathofmarket/server/session/SessionStore.java) |
+| 会话与恢复 | 消息逐条追加到 JSONL（`id`/`parentId` 分支）并写执行检查点；中断或预算用尽后从保存处继续，已读资料不重读 | [session_recorder.py](apps/agent/app/services/session_recorder.py) · [research_recovery.py](apps/agent/app/services/research_recovery.py) · [sessions.py](apps/agent/app/storage/sessions.py) |
 | Harness 校验 | 提示词给软约束，程序硬核对：来源须已读、表格数字逐格对原文、图表 ID、预兆章节、截止日；格式问题自动整理，真实性严格把关 | [runner_report.py](apps/agent/app/services/runner_report.py) |
 | 长报告写作 | 大纲 → 逐节生成并保存 → 数据表 → 复核局部补丁；失败只重试失败的那一节 | [runner_writing.py](apps/agent/app/services/runner_writing.py) |
 | 预兆与方法 | 预兆规格改变研究计划、加载的金融 Skill、必写章节与自检；方法按需读取 | [omens.py](apps/agent/app/core/omens.py) · [research_skills.py](apps/agent/app/core/research_skills.py) |
 | 数据工具 | 巨潮年报、AKShare 结构化财务、行情、MCP 网页搜索与正文 | [financial_db.py](apps/agent/app/tools/financial_db.py) · [public_web.py](apps/agent/app/tools/public_web.py) |
 | 预算与多模型 | 调用 / token / 时间上限并为写作预留；服务商差异档案，`.env` 切换 DeepSeek / OpenAI 兼容接口 | [runtime.py](apps/agent/app/services/runtime.py) · [config.py](apps/agent/app/core/config.py) |
-| 记忆 | 跨研究的经历与主题观察；偏好须用户确认才生效 | [user_memory.py](apps/agent/app/services/user_memory.py) · [ResearchMemoryStore.java](apps/server/src/main/java/com/pathofmarket/server/memory/ResearchMemoryStore.java) |
+| 记忆 | 跨研究的经历与主题观察；偏好须用户确认才生效 | [user_memory.py](apps/agent/app/services/user_memory.py) · [memory.py](apps/agent/app/storage/memory.py) |
 
 207 项离线测试（模型用脚本化假实现）+ 多家公司真实运行验收。
 
@@ -111,8 +111,8 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 
 ```mermaid
 flowchart LR
-  W[React 网页<br/>5173] --> J[Java Spring Boot<br/>8080<br/>任务 · 会话 JSONL · 记忆]
-  J --> P[Python FastAPI<br/>8000<br/>研究 Agent 循环]
+  W[React 网页] -->|同源 /api| P[Python FastAPI · 8080]
+  P --> S[会话 JSONL · 用户记忆 · 检查点]
   P --> M[大模型<br/>DeepSeek / OpenAI 兼容]
   P --> T1[巨潮资讯<br/>年报 PDF]
   P --> T2[AKShare<br/>结构化财务]
@@ -122,19 +122,21 @@ flowchart LR
 
 ## 快速开始
 
-已验证环境：Windows 11、Python 3.14、JDK 25、Node.js 24。启动脚本为 PowerShell。
+已验证环境：Windows 11、Python 3.14、Node.js 24。启动脚本为 PowerShell。
 
 > Windows 提示：第三方方法文件路径较深，请克隆到较短的目录（如 `C:\code\path-of-market`），或先运行 `git config --global core.longpaths true`。
 
 1. 复制 `.env.example` 为 `.env`，填入模型密钥（推荐 DeepSeek，只填 `DEEPSEEK_API_KEY` 即可）。
-2. 启动三个服务（首次会自动建 Python 虚拟环境、安装依赖、构建 Java）：
+2. 启动 FastAPI 和网页。首次运行会创建 Python 虚拟环境并安装依赖。
 
    ```powershell
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-app.ps1
    ```
 
-3. 打开 http://127.0.0.1:5173/ ，填研究对象和问题，选几个预兆，开始“真实研究”。“演示报告”不需要密钥、不产生费用。
+3. 打开启动脚本打印的网页地址（默认 `http://127.0.0.1:5173/`，Windows 保留端口时自动另选），填研究对象和问题，选几个预兆，开始“真实研究”。“演示报告”不需要密钥、不产生费用。
 4. 停止：`.\scripts\stop-app.ps1`。离线测试：`.\apps\agent\.venv\Scripts\python.exe -m unittest discover -s apps\agent\tests -t apps\agent\tests`
+
+后端代码入口是 [FastAPI 应用](apps/agent/app/main.py)。旧会话和检查点可直接读取。接口、验收命令及回退步骤见[后端兼容说明](docs/backend-compatibility.md)。
 
 ## 模型支持
 

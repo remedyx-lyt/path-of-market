@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [ValidateRange(1, 65535)]
-    [int]$Port = 8000,
+    [int]$Port = 8080,
     [switch]$Reload,
     [switch]$InstallDependencies
 )

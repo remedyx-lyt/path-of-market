@@ -64,7 +64,7 @@ try {
   await page.getByRole('button',{name:'填入示例'}).click()
   await page.getByRole('button',{name:'生成演示报告'}).click()
   await page.getByText('演示报告 · MOCK',{exact:true}).waitFor()
-  checks.push('original actual Java/Python mock report still works')
+  checks.push('original actual FastAPI mock report still works')
   assert.deepEqual(errors,[])
   checks.push('no browser exceptions')
   console.log(JSON.stringify({passed:checks.length,checks,taskId:job.taskId},null,2))

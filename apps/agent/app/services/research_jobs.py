@@ -1,4 +1,4 @@
-"""单机进程内任务；事件带父关系。有记录器时，事件、消息与报告同时写入 Java SessionStore 的会话 JSONL（M2-1）。"""
+"""单机进程内任务；事件带父关系。有记录器时，事件、消息与报告同时写入 SessionStore 的会话 JSONL（M2-1）。"""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -29,6 +29,7 @@ class ResearchJob:
     cancel_requested: bool = False
     task: object = field(default=None, repr=False)
     recorder: object = field(default=None, repr=False)  # SessionRecorder；单元测试直接构造的任务没有
+    is_followup: bool = False
     parent_task_id: str | None = None
     followup: dict | None = None
 
@@ -82,16 +83,26 @@ class ResearchJob:
 class JobStore:
     def __init__(self):
         self.jobs = {}
+        self.followup_lock = asyncio.Lock()
+
+    def busy(self):
+        return any(j.status in {"queued", "running"} or j.task and not j.task.done() for j in self.jobs.values())
+
+    def continuation(self, parent_id):
+        return next((j for j in self.jobs.values() if not j.is_followup and j.parent_task_id == parent_id), None)
+
+    def register(self, job):
+        while len(self.jobs) >= 8:
+            self.jobs.pop(next(iter(self.jobs)))
+        self.jobs[job.task_id] = job
 
     def start(self, request, settings, *, recovery=None):
         if recovery:
-            previous = next((j for j in self.jobs.values() if j.parent_task_id == recovery["taskId"]), None)
+            previous = self.continuation(recovery["taskId"])
             if previous:
                 return previous
-        if any(j.status in {"queued", "running"} or j.task and not j.task.done() for j in self.jobs.values()):
+        if self.busy():
             return None
-        while len(self.jobs) >= 8:
-            self.jobs.pop(next(iter(self.jobs)))
         job = ResearchJob(request)
         job.parent_task_id = recovery["taskId"] if recovery else None
         job.recorder = SessionRecorder(job.session_id, job.task_id)
@@ -102,20 +113,23 @@ class JobStore:
         runner = AgentRunner(job, get_research_tools(), settings, **({"recovery": recovery} if recovery else {}))
         job.recorder.start()
         job.emit("user_message", "研究任务已创建")
-        self.jobs[job.task_id] = job
+        self.register(job)
         job.task = asyncio.create_task(runner.run())
         return job
 
     def cancel(self, job):
         if job.status in {"queued", "running"}:
             job.cancel_requested = True
-            if job.task:
+            # 排队中的协程需要进入 try/finally 才能保存取消状态。
+            if job.task and job.status == "running":
                 job.task.cancel()
-            if job.status == "queued":
-                job.status = "cancelled"
-                job.finished_at = now()
-                job.emit("run_cancelled", "研究任务已取消")
         return job
+
+    async def shutdown(self):
+        active = [job for job in self.jobs.values() if job.task and not job.task.done()]
+        for job in active:
+            self.cancel(job)
+        await asyncio.gather(*(job.task for job in active), return_exceptions=True)
 
 
 job_store = JobStore()

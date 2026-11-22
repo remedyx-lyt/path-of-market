@@ -718,6 +718,8 @@ class AgentRunner(UserMemoryMixin, CompactionMixin, HistoryMixin, WebMixin, Read
         self.job.emit("run_started", "开始研究；模型将选择需要的报告和行情")
         try:
             async with asyncio.timeout(self.limits.max_seconds):
+                if self.job.cancel_requested:
+                    raise asyncio.CancelledError
                 await self.load_user_memory()
                 if not self.recovery or self.method_usage is None:
                     self.job.set_phase("methods", "阶段：阅读研究方法、形成研究计划")

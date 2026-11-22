@@ -1,4 +1,4 @@
-/** 实际Java记忆HTTP夹具的网页契约、零收费读取、版本冲突与失败输入保留；不调用模型。 */
+/** 实际后端记忆HTTP夹具的网页契约、零收费读取、版本冲突与失败输入保留；不调用模型。 */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'

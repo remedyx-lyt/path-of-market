@@ -1,4 +1,4 @@
-"""启动迁移前的真实 FastAPI 应用。只在这个测试进程内替换模型和外部资料源。"""
+"""启动真实 FastAPI 应用。只在这个测试进程内替换模型和外部资料源。"""
 import asyncio
 import json
 import os
@@ -8,7 +8,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "apps/agent/tests"))
 
-from support import DOC_ID, SETTINGS, USAGE, FakeModel, make_tools
+from support import DOC_ID, SETTINGS, USAGE, FakeModel, make_tools, report, section
 from app.api.routes import jobs, research
 from app.main import app
 from app.schemas.research import ModelContent
@@ -17,7 +17,7 @@ from app.tools import public_web
 import uvicorn
 
 
-def serve(port, directory):
+def serve(port, directory, *, pause_for_cancel=True):
     public_web.PROJECT_ROOT = directory
     os.environ["MCP_WEB_ENABLED"] = "false"
     tools = make_tools(directory / "evidence")
@@ -32,13 +32,20 @@ def serve(port, directory):
         async def __call__(self, settings, messages, **kwargs):
             kind = self.kind(messages, kwargs)
             record(kind)
-            if kind == "section" and not self.resumed:
+            if pause_for_cancel and kind == "section" and not self.resumed:
                 # 资料读完后等待公开 DELETE 请求，以便稳定重现中途取消。
                 await asyncio.Event().wait()
             return await super().__call__(settings, messages, **kwargs)
 
     def make_runner(job, tools, settings, *, recovery=None):
-        model = ResearchModel(ready=True)
+        draft = report()
+        if job.request.include_financials:
+            draft = report([
+                section("业务与业绩", "合成资料仅覆盖已读两页。", topics=["business", "performance", "research"]),
+                section("财务与风险", "盈利、现金流及负债数据仍有缺口。", topics=["profitability", "cashflow", "balance_sheet", "risks"]),
+                section("行情", "价格使用同一口径。", market=True),
+            ])
+        model = ResearchModel(ready=True, final=draft)
         model.resumed = recovery is not None
         return agent_runner.AgentRunner(job, tools, settings, completion=model, recovery=recovery)
 
@@ -60,4 +67,4 @@ def serve(port, directory):
 
 
 if __name__ == "__main__":
-    serve(int(sys.argv[1]), Path(sys.argv[2]))
+    serve(int(sys.argv[1]), Path(sys.argv[2]), pause_for_cancel="--complete" not in sys.argv[3:])

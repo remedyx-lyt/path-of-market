@@ -1,19 +1,25 @@
-# 后端迁移第一阶段 · Web API 与历史数据兼容基线
+# Python 后端兼容与切换
 
-基准是本地提交 `0c6120b` 的 Spring Boot + FastAPI 实现。后续 Python 后端要接受相同的网页请求、返回前端能解析的结果，并能打开旧版写入的文件。下面的黑盒检查在独立临时目录中运行，实际启动两个服务，使用合成的资料、历史记录和模型回答。
+React 经同源代理调用一个 FastAPI 进程。API 和研究任务共享 `SessionStore` 与 `MemoryStore`，继续使用已有 JSONL、记忆和检查点。单个后端独占会话目录，启动第二个写入进程会失败。指定单独会话目录可设置进程环境变量 `SESSIONS_DIR`，相对路径从项目根目录计算。研究资料与检查点仍在 `storage/documents`。
 
-## 复现
+## 复验
 
-在仓库根目录的 PowerShell 运行下列命令。使用项目现有的 Python 虚拟环境、JDK 和 Maven Wrapper。已有可用 JAR 时，重跑可直接执行最后一行。首次安装环境见 [README](../README.md#快速开始)。
+在仓库根目录运行。兼容脚本在临时目录使用合成历史样本、两页 PDF 和本地模型替身，三次独立启动同一个后端。浏览器检查使用本机 Chrome 和 Playwright，支持 `CHROME_PATH`、`PLAYWRIGHT_MODULE_PATH` 覆盖路径。
 
 ```powershell
-Push-Location apps/server
-try { .\mvnw.cmd --batch-mode --no-transfer-progress package } finally { Pop-Location }
-if ($LASTEXITCODE -ne 0) { throw 'Java 构建失败' }
 .\apps\agent\.venv\Scripts\python.exe -X utf8 scripts/check-backend-contract.py
+.\apps\agent\.venv\Scripts\python.exe -X utf8 scripts/check-discussion.py
+.\apps\agent\.venv\Scripts\python.exe -X utf8 scripts/check-memory.py
+node scripts/check-python-web.mjs
 ```
 
-脚本为每次运行创建临时目录，复制固定样本，在随机回环端口启动服务，完成后清理。JSONL、记忆文件和运行检查点都指向该副本。模型、公告和行情使用测试替身。一次运行包含三次冷启动，共两次重启。公开 HTTP 场景位于 [scenarios.py](../scripts/backend_contract/scenarios.py)，与参考后端的启动代码分开；将来可用同一组请求和断言验证合并后的 FastAPI 服务。
+## 切换与回退
+
+先结束进行中的研究，运行 `scripts/stop-app.ps1`。备份 `storage/sessions` 和 `storage/documents/run-checkpoints`，保留同一份资料缓存。运行 `scripts/start-app.ps1` 后可从最近研究打开原报告；查看记录只读取本地文件。Windows 保留默认端口时，脚本会打印实际网址，`scripts/check-app.ps1` 根据启动记录检查两个服务和网页代理。
+
+回到旧运行方式时，先停新后端并保存切换后的记录。在独立工作目录检出 `900831b`，按该版本 README 准备 JDK、Node 和 Python，用备份副本还原上述相对路径及对应资料缓存，再运行旧版启动脚本。原目录保留切换后的新增研究。从该提交也可复现双向读写比对 `scripts/check-backend-contract.py --compare-storage`。旧内部 HTTP 写入端点随 Java 退役，Agent 直接调用存储。
+
+2026-11-22 已在隔离数据副本上演练回退。原版后端成功读回旧报告、原记忆版本以及 Python 新追加的一份报告。
 
 ## 12 个公开操作
 
@@ -47,10 +53,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Java 构建失败' }
 | 已完成研究带一次修订 | 通过根任务读取第一版，通过追问任务读取修订版。两版报告、父版本、追问节点和用户回答能够对应。 |
 | 中断且仅有活动记录 | 历史可读，状态为 `failed`，错误码为 `RESEARCH_INTERRUPTED`；尝试接续得到 `409`。 |
 | 中断且保有旧版检查点 | 恢复已读的两页资料，生成独立的新任务并完成报告。根据工具记录和测试模型调用记录核对没有重读。 |
-| 再创建一个任务并取消 | 运行期间第二次创建得到 `409`。资料读完后取消，重启两个服务，再接续到完成；旧任务仍可按原 ID 查询。 |
+| 再创建一个任务并取消 | 运行期间第二次创建得到 `409`。资料读完后取消，重启后端，再接续到完成；旧任务仍可按原 ID 查询。 |
 | 重发同一次追问 | 任务还在内存时返回原追问任务。再次重启后重发返回 `409 RESEARCH_NOT_RESUMABLE`，打开历史仍能读到原回答。两次重发合计没有增加模型调用。 |
 | 更新旧记忆 | 旧版偏好可以读取；提交过期修改不会覆盖新值，非法修改不会递增版本。重启后开关及版本仍可读。 |
 
-测试结束逐字节核对 3 份原始 JSONL 和原始检查点。旧会话格式、批量追加、重复事件去重、截断行恢复和记忆候选规则的详细参考见 [check-sessions.py](../scripts/check-sessions.py) 与 [check-memory.py](../scripts/check-memory.py)。这些脚本仍包含旧服务的内部 HTTP 入口，第二阶段可将针对存储行为的断言移到 Python 存储实现。
-
-下一阶段是迁移会话和记忆存储，先在样本副本上验证。当前生产请求仍走 React → Java → Python。本次基线覆盖接口、数据和执行语义，真实供应商输出质量及长时间负载需要单独验证。
+测试结束逐字节核对三份原始 JSONL 和原始检查点。条目去重、截断行恢复、并发提交与记忆候选规则见[存储测试](../apps/agent/tests/test_local_storage.py)及[记忆验收](../scripts/check-memory.py)。

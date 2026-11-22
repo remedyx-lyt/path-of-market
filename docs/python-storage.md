@@ -1,6 +1,6 @@
 # 第二阶段 · Python 会话与研究记忆存储
 
-`SessionStore` 和 `MemoryStore` 可以直接打开既有的会话目录。会话沿用 `{sessionId}.jsonl`，偏好沿用 `memory/user.json`，检查点继续由研究引擎管理。本阶段在临时副本上验证双向读写。日常启动的网页和 Agent 仍使用 Java 存储入口。
+`SessionStore` 和 `MemoryStore` 可以直接打开既有的会话目录。会话沿用 `{sessionId}.jsonl`，偏好沿用 `memory/user.json`，检查点继续由研究引擎管理。本阶段在临时副本上验证双向读写。本文记录 2026-11-18 的阶段状态；现行接线及命令见[后端兼容说明](backend-compatibility.md)。
 
 ## 从哪里读代码
 
@@ -9,7 +9,7 @@
 | [sessions.py](../apps/agent/app/storage/sessions.py) | `append` 按会话串行追加并按条目 ID 去重。`entries_for_run` 按运行 ID 取回整份会话，包括追问节点。冷启动从文件重建索引。 |
 | [projections.py](../apps/agent/app/storage/projections.py) | 从条目还原某次任务的快照、对话分支及报告版本、最近研究列表和记忆用的用户提问。缺少结束记录的任务显式标记为 `RESEARCH_INTERRUPTED`。 |
 | [memory.py](../apps/agent/app/storage/memory.py) | `snapshot`、`edit` 和 `suggest` 读取、修改偏好及记录候选。提交时检查 `revision`，候选须能在同一次运行的用户原话中找到。 |
-| [storage_comparison.py](../scripts/backend_contract/storage_comparison.py) | 实际启动旧服务，让 Java 写入、Python 接手、Java 冷启动读回。在相同文件上逐字段比较快照、完整条目、版本、最近记录和记忆。 |
+| `storage_comparison.py`（提交 `900831b`） | 实际启动旧服务，让 Java 写入、Python 接手、Java 冷启动读回。在相同文件上逐字段比较快照、完整条目、版本、最近记录和记忆。 |
 
 第三阶段在应用启动时创建一套 `sessions = SessionStore(directory)` 和 `memory = MemoryStore(sessions)`，供路由与研究任务共享。`directory` 指向会话目录本身。当前的锁协调同一进程内共享这些实例的调用，每个数据目录由一个写入进程负责。交接时先停旧写入方再启动新写入方。
 
@@ -22,7 +22,7 @@
 
 ## 如何复验
 
-在仓库根目录运行。跨语言检查使用第一阶段的 Java JAR，构建方式见[兼容基线](backend-compatibility.md)。
+以下历史命令在提交 `900831b` 的仓库根目录运行。跨语言检查使用第一阶段的 Java JAR，构建方式见[兼容基线](backend-compatibility.md)。
 
 ```powershell
 .\apps\agent\.venv\Scripts\python.exe -X utf8 -m unittest discover -s apps/agent/tests -p test_local_storage.py
@@ -34,4 +34,4 @@
 
 2026-11-18 上述三项均已通过。Python 全量离线测试通过 219 项，包含本阶段新增的 12 项存储测试。
 
-下一阶段将公开 API、Agent 的事件追加、接续读取和记忆工具接到同一套存储实例，再运行同一套网页兼容检查。
+2026-11-22 公开 API、Agent 事件、接续与记忆工具已接到同一份存储。

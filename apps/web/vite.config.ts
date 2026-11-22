@@ -3,7 +3,7 @@ import type { ProxyOptions } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const defaultProxy: ProxyOptions = {
-  target: process.env.JAVA_SERVER_URL || 'http://127.0.0.1:8080',
+  target: process.env.API_SERVER_URL || 'http://127.0.0.1:8080',
   changeOrigin: true,
   proxyTimeout: 20_000,
   configure(proxy) {

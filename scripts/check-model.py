@@ -2,7 +2,9 @@
 
 import argparse
 from contextlib import contextmanager
+from backend_contract.qa_server import start_python
 from datetime import date
+from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -10,6 +12,7 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 import threading
 import time
 from urllib.error import HTTPError
@@ -37,32 +40,35 @@ def isolated_agent(provider_url, **overrides):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    env = dict(os.environ, DEEPSEEK_API_KEY=TEST_KEY, DEEPSEEK_BASE_URL=provider_url,
+    env = dict(os.environ, LLM_PROVIDER="deepseek", LLM_API_KEY="", LLM_BASE_URL="", LLM_MODEL="", DEEPSEEK_API_KEY=TEST_KEY, DEEPSEEK_BASE_URL=provider_url,
                DEEPSEEK_MODEL="isolated-check", LLM_TIMEOUT_SECONDS="0.6", LLM_MAX_TOKENS="1800")
     env.update(overrides)
-    process = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port)],
-                               cwd=ROOT / "apps/agent", env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                               creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-    base = f"http://127.0.0.1:{port}"
-    try:
-        for _ in range(100):
-            if process.poll() is not None:
-                raise RuntimeError("隔离研究服务启动失败")
-            try:
-                if request(base + "/health")[0] == 200:
-                    break
-            except OSError:
-                time.sleep(0.1)
-        else:
-            raise RuntimeError("隔离研究服务未就绪")
-        yield base
-    finally:
-        process.terminate()
+    with TemporaryDirectory(prefix="pom-model-") as sessions:
+        env["SESSIONS_DIR"] = sessions
+        process = start_python(
+            ["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port)],
+            cwd=ROOT / "apps/agent", env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        base = f"http://127.0.0.1:{port}"
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+            for _ in range(100):
+                if process.poll() is not None:
+                    raise RuntimeError("隔离研究服务启动失败")
+                try:
+                    if request(base + "/health")[0] == 200:
+                        break
+                except (OSError, HTTPException):
+                    time.sleep(0.1)
+            else:
+                raise RuntimeError("隔离研究服务未就绪")
+            yield base
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
 
 
 def isolated_checks():
@@ -163,6 +169,10 @@ def isolated_checks():
             code, failure = request(base + "/research/model", TASK)
             assert code == 503 and failure["error"]["code"] == "MODEL_NOT_CONFIGURED"
             assert failure["run"]["states"] == ["created", "failed"]
+            for path in ("/api/research/model", "/api/research/jobs"):
+                code, public = request(base + path, TASK)
+                assert code == 503 and set(public) == {"error"}
+                assert public["error"]["code"] == "MODEL_NOT_CONFIGURED"
             checks += 1
             print("PASS: 缺少密钥有明确提示，无模型请求")
         with isolated_agent(provider_url, DEEPSEEK_BASE_URL="https://invalid.example/?key=private") as base:
@@ -184,7 +194,7 @@ def live_check(base_url):
         raise SystemExit(1)
     assert body["mode"] == "model" and body["isMock"] is False and body["run"]["status"] == "completed"
     assert body["sources"] == [] and body["toolCalls"] == []
-    print(f"PASS: 网页 -> Java -> Python -> 模型真实调用；章节数={len(body['sections'])}，状态=completed，未检索资料")
+    print(f"PASS: 网页 -> FastAPI -> 模型真实调用；章节数={len(body['sections'])}，状态=completed，未检索资料")
 
 
 if __name__ == "__main__":

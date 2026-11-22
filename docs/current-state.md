@@ -1,12 +1,14 @@
 # 当前进度
 
-更新时间：2026-11-18（Australia/Sydney）。研究示例截止日期 2026-10-23。历史交付与验收细节见 [history.md](history.md)（原文保留）。
+更新时间：2026-11-22（Australia/Sydney）。研究示例截止日期 2026-10-23。历史交付与验收细节见 [history.md](history.md)（原文保留）。
 
 ## Python 后端迁移
 
-2026-11-18 完成[第二阶段的 Python 会话和记忆存储](python-storage.md)。在临时副本上验证 Java → Python → Java 的双向读写，覆盖旧报告、追问版本、记忆来源与删除指纹、部分写入重试和同进程并发。生产入口仍使用 Java，下一阶段接入 FastAPI 的公开路由与 Agent 内部调用。
+2026-11-22 已切换为 React + 单进程 FastAPI。启动、数据格式、隔离复验与回退步骤见[后端兼容说明](backend-compatibility.md)。
 
-同日完成[第一阶段兼容基线](backend-compatibility.md)。现有 Java + FastAPI 服务通过 12 个公开 HTTP 操作的隔离验收。两次重启覆盖了旧报告与版本、用户记忆、两页资料的旧检查点、取消后接续和重复追问。使用本地脚本模型和临时数据副本。
+2026-11-18 完成[第二阶段的 Python 会话和记忆存储](python-storage.md)。在临时副本上验证 Java → Python → Java 的双向读写，覆盖旧报告、追问版本、记忆来源与删除指纹、部分写入重试和同进程并发。该阶段验证通过后，FastAPI 已接管公开路由与 Agent 内部存储。
+
+同日完成[第一阶段兼容基线](backend-compatibility.md)。当时的 Java + FastAPI 服务通过 12 个公开 HTTP 操作的隔离验收。两次重启覆盖了旧报告与版本、用户记忆、两页资料的旧检查点、取消后接续和重复追问。使用本地脚本模型和临时数据副本。
 
 ## 一句话状态
 
@@ -145,7 +147,7 @@ PDF 渲染供模型查看原页和自动核对主要会计数据使用。本轮�
 
 ## 系统现在能做什么
 
-网页输入 → Java 异步任务 → Python `AgentRunner`：读取相关研究记忆 → 按本次问题/预兆及确认偏好完整读取原版方法并形成计划 → 模型循环调用九个逻辑工具（含研究记录回查、用户记忆回查/建议写入）→ 程序核查引用/覆盖/图表/预兆章节 → 写正文、生成数据表、复核 → 网页展示报告与过程；侧栏可追问/修订正文，长历史按需摘要。会话JSONL/检查点与独立偏好文件持久化；底层公开数据工具九个（2026-10-26 新增 AKShare 结构化财务报表 `get_financial_statements`，由程序自动调用，不在模型工具列表中）。
+网页输入 → FastAPI 异步任务 → Python `AgentRunner`：读取相关研究记忆 → 按本次问题/预兆及确认偏好完整读取原版方法并形成计划 → 模型循环调用九个逻辑工具（含研究记录回查、用户记忆回查/建议写入）→ 程序核查引用/覆盖/图表/预兆章节 → 写正文、生成数据表、复核 → 网页展示报告与过程；侧栏可追问/修订正文，长历史按需摘要。会话JSONL/检查点与独立偏好文件持久化；底层公开数据工具九个（2026-10-26 新增 AKShare 结构化财务报表 `get_financial_statements`，由程序自动调用，不在模型工具列表中）。
 
 ## 尚未实现
 
@@ -156,19 +158,19 @@ PDF 渲染供模型查看原页和自动核对主要会计数据使用。本轮�
 
 | 项目 | 状态 |
 | --- | --- |
-| 三服务 | React 5173 → Java 8080 → Python 8000；`scripts/start-app.ps1` / `stop-app.ps1` / `check-app.ps1` |
+| 本地服务 | React（默认 5173）→ FastAPI（默认 8080）；`scripts/start-app.ps1` / `stop-app.ps1` / `check-app.ps1` |
 | Python | 3.14.3（本机）；依赖固定在 `apps/agent/requirements.txt`；风格配置 `apps/agent/ruff.toml`（ruff 可选安装） |
-| 测试 | 当前118项Python单测全量通过，最后记忆分支过滤后重跑12项相关检查；20项记忆HTTP、32项聊天/压缩/恢复集成、前端记忆契约、8组恢复UI、F9与摘要前端通过；本轮真实模型调用0次 |
+| 迁移验收 | 220 项 Python 单测、16 项研究循环检查、12 个公开 HTTP 操作、20 项记忆检查和 35 项报告对话检查通过。浏览器实测新建研究、阅读报告、追问及重开历史。模型与资料源使用本地替身。 |
 | 模型 | DeepSeek `deepseek-flash`，只由 Python 从 `.env` 读取；视觉模型名单可用 `DEEPSEEK_VISION_MODELS` 覆盖；写作等待上限 `LLM_REPORT_TIMEOUT_SECONDS` |
-| 会话 | `storage/sessions/*.jsonl`（不进 Git），Java `SessionStore` 写入 |
-| 用户记忆 | `storage/sessions/memory/user.json`（不进Git），Java `ResearchMemoryStore` 原子保存；经历来自成功会话，不重读PDF |
+| 会话 | `storage/sessions/*.jsonl`（不进 Git），Python `SessionStore` 写入 |
+| 用户记忆 | `storage/sessions/memory/user.json`（不进Git），Python `MemoryStore` 原子保存；经历来自成功会话，不重读PDF |
 | 原版 Skill | Anthropic financial-services@574ed36 的 16 个 Skill / 36 个文件，哈希校验通过 |
 | Git | 本地 `main`，无远程；每完成一轮本地提交 |
 
 ## 当前约定
 
 - 项目说明、页面文案和必要注释尽量使用中文；代码标识优先使用英文。
-- React、Java、Python 分工不变；每次只完成一个明确任务，完成情况按实际检查结果记录。
+- 网页通过同源 API 调用 FastAPI；每次只完成一个明确任务，完成情况按实际检查结果记录。
 - 核心 Agent 机制先查成熟实现或官方文档，记录在 `agent-design-decisions.md`。
 - 选定资料默认完整阅读；离线检查与真实模型验收分开记录，不虚构工具执行、来源或预兆覆盖。
 - 每个功能任务完成后更新本文件“下一步”与 `task-board.md` 并提交 Git；涉及前端先读 `design-style.md`。

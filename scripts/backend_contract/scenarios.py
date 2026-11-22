@@ -1,4 +1,5 @@
 """迁移前后共用的公开 HTTP 检查。此文件不导入任何 Java、FastAPI 或存储实现。"""
+from concurrent.futures import ThreadPoolExecutor
 import json
 import time
 from urllib.error import HTTPError
@@ -148,7 +149,11 @@ def resume_and_chat(api, task, coverage):
     assert version["report"] == job["report"]
     path = f"{JOBS}/{child}/chat"
     body = {"parentId": version["id"], "action": "ask", "message": "请解释结论", "requestId": str(uuid4())}
-    sent = api.request("POST", path, 202, body)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(api.request, "POST", path, 202, body)
+        second = pool.submit(api.request, "POST", path, 202, body)
+        sent = first.result()
+        assert second.result()["taskId"] == sent["taskId"]
     assert sent["parentTaskId"] == child
     api.terminal(sent["taskId"], "completed")
     duplicate = api.request("POST", path, 202, body)

@@ -4,8 +4,10 @@ from dataclasses import replace
 import importlib.util
 from io import BytesIO
 import json
+import os
 from pathlib import Path
 import sys
+from unittest.mock import patch
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -196,6 +198,10 @@ class RunnerFixture:
     def setUp(self):
         self.tmp = TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        from app.storage import get_storage
+        self.enterContext(patch.dict(os.environ, {"SESSIONS_DIR": str(Path(self.tmp.name) / "sessions")}))
+        get_storage.cache_clear()
+        self.addCleanup(get_storage.cache_clear)
         self.tools = make_tools(self.tmp.name)
 
     def runner(self, model=None, *, limits=None, **request):

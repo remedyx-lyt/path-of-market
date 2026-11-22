@@ -1,9 +1,11 @@
-"""M2-1 会话持久化（Python 侧）：条目结构与顺序、消息记录与作废、后台提交与失败重试。Java 侧见 scripts/check-sessions.py。"""
+"""M2-1 会话持久化（Python 侧）：条目结构与顺序、消息记录与作废、后台提交与失败重试。"""
 
 import asyncio
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import json
-import threading
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+from app.storage.sessions import SessionStore
 import unittest
 
 from support import FakeModel, RunnerFixture, report
@@ -11,47 +13,27 @@ from support import FakeModel, RunnerFixture, report
 from app.services.session_recorder import RecordedMessages, SessionRecorder
 
 
-def store_server(fail_first=0):
-    """本地假的 Java SessionStore：记录收到的条目；前 fail_first 次返回 503，模拟存储暂不可用。"""
-    state = {"entries": [], "calls": 0}
-
-    class Store(BaseHTTPRequestHandler):
-        def log_message(self, *_):
-            pass
-
-        def do_POST(self):
-            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            state["calls"] += 1
-            if state["calls"] <= fail_first:
-                self.send_response(503)
-                self.end_headers()
-                return
-            known = {e["id"] for e in state["entries"]}
-            state["entries"] += [e for e in body["entries"] if e["id"] not in known]  # 与 Java 一样按 id 去重
-            encoded = json.dumps({"written": len(body["entries"])}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(encoded)))
-            self.end_headers()
-            self.wfile.write(encoded)
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Store)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server, state
-
-
 class Sessions(RunnerFixture, unittest.IsolatedAsyncioTestCase):
     async def run_recorded(self, model, fail_first=0):
-        server, state = store_server(fail_first)
-        self.addCleanup(server.server_close)
-        self.addCleanup(server.shutdown)
+        directory = self.enterContext(TemporaryDirectory())
+        store = SessionStore(Path(directory))
+        append = store.append
+
+        def write(session_id, batch):
+            nonlocal fail_first
+            if fail_first:
+                fail_first -= 1
+                raise OSError("storage offline")
+            return append(session_id, batch)
+
+        self.enterContext(patch.object(store, "append", write))
         job, runner = self.runner(model)
-        job.recorder = SessionRecorder(job.session_id, job.task_id, f"http://127.0.0.1:{server.server_port}/internal/sessions", interval=0.05)
+        job.recorder = SessionRecorder(job.session_id, job.task_id, store, interval=0.05)
         job.recorder.header(job.request.model_dump(mode="json", by_alias=True))
         runner.messages = RecordedMessages(runner.messages, job.recorder)
         job.recorder.start()
         await runner.run()
-        return job, state["entries"]
+        return job, store.load(job.session_id)
 
     async def test_entries_form_one_chain_with_messages_events_and_report(self):
         job, entries = await self.run_recorded(FakeModel(ready=True))
@@ -96,7 +78,7 @@ class Sessions(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job.snapshot()["persistence"]["unsent"], 0)
 
     async def test_recorded_messages_track_pop(self):
-        recorder = SessionRecorder("s", "r", "http://127.0.0.1:1/x")
+        recorder = SessionRecorder("s", "r")
         messages = RecordedMessages([{"role": "system", "content": "a"}], recorder)
         messages.append({"role": "assistant", "content": "draft"})
         draft_id = recorder.last_id

@@ -8,7 +8,13 @@ Path of Market（市场之路）是一个包含研究 Agent 的个人财经研�
 
 第一版在本机运行，用浏览器访问。网页界面与后端服务共同组成完整应用，部署方式不决定它是否具备 Agent 行为。
 
-## 总体架构
+## 当前运行架构
+
+网页（React + Vite）通过同源 `/api` 访问 [FastAPI](../apps/agent/app/main.py)。[任务路由](../apps/agent/app/api/routes/jobs.py)负责创建、轮询、接续及追问。[历史与记忆路由](../apps/agent/app/api/routes/history.py)负责最近研究、会话树和偏好编辑。模型调用、工具与证据校验沿用既有 Runner。会话追加和记忆修改均在同一进程使用[共享存储](../apps/agent/app/storage)，磁盘 I/O 在工作线程执行。查询优先返回实时任务，重启后从 JSONL 重建快照。
+
+启动与回退见[后端兼容说明](backend-compatibility.md)。以下小节记录 2026 年 10 月的架构、阶段目标与历史验收。
+
+## 历史总体架构
 
 ```text
 用户

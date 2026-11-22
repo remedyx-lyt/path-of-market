@@ -225,7 +225,7 @@ export const activityJobSchema = jobSchema.pick({ taskId: true, status: true, pr
   target: str, phase: str.optional(), usage: z.record(str, finite.nonnegative()), parentTaskId: str.regex(/^[0-9a-f-]{36}$/i).nullish(),
 })
 
-/** 研究记录列表（M2-1，来自 Java SessionStore）。 */
+/** 研究记录列表（M2-1，来自会话存储）。 */
 export const sessionListSchema = z.object({
   sessions: z.array(z.object({ sessionId: str, runId: str, createdAt: str, target: str, question: str, status: str, title: str.optional() })),
 })

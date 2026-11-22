@@ -1,4 +1,4 @@
-"""研究会话记录（M2-1）：把一次研究的事件、模型消息、报告按顺序提交给 Java SessionStore，写成 JSONL。
+"""研究会话记录（M2-1）：把一次研究的事件、模型消息、报告按顺序提交到本地 SessionStore，写成 JSONL。
 
 参照 Pi SessionManager 的条目结构：首条会话头，之后每条都有 id 与 parentId（指向上一条，形成当前分支），
 另有 timestamp、sessionId、runId。条目类型：
@@ -13,23 +13,21 @@
 """
 
 import asyncio
-import json
 import logging
-import os
 from uuid import uuid4
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from contextlib import suppress
 
+from app.storage import get_storage
 from app.services.runtime import now
 
 logger = logging.getLogger("path_of_market.session")
-DEFAULT_URL = "http://127.0.0.1:8080/internal/sessions"
 
 
 class SessionRecorder:
-    def __init__(self, session_id, run_id, base_url=None, interval=1.0):
+    def __init__(self, session_id, run_id, store=None, interval=1.0):
         self.session_id, self.run_id = session_id, run_id
-        self.base_url = (base_url or os.environ.get("SESSION_STORE_URL") or DEFAULT_URL).rstrip("/")
+        self.store = store
+        self.flush_lock = asyncio.Lock()
         self.interval = interval
         self.pending, self.last_id = [], None
         self.sent, self.failures, self.last_error = 0, 0, None
@@ -75,23 +73,21 @@ class SessionRecorder:
             "lastError": self.last_error,
         }
 
-    def post(self, batch):
-        body = json.dumps({"entries": batch}, ensure_ascii=False, default=str).encode("utf-8")
-        request = Request(
-            f"{self.base_url}/{self.session_id}/entries", data=body, method="POST", headers={"Content-Type": "application/json"}
-        )
-        with urlopen(request, timeout=10) as response:
-            return json.load(response)
+    def append(self, batch):
+        store = self.store if self.store is not None else get_storage().sessions
+        store.append(self.session_id, batch)
 
     async def flush(self):
-        """把已有条目按顺序提交；成功才移出队列，失败保留到下次（Java 端按 id 去重，重发不会写重复行）。"""
+        """后台定时提交和主动提交共享同一队列；按条目 id 安全重试。"""
+        async with self.flush_lock:
+            return await self._flush_pending()
+
+    async def _flush_pending(self):
         while self.pending:
             batch = self.pending[:200]
             try:
-                await asyncio.to_thread(self.post, batch)
-            except (HTTPError, URLError, OSError, ValueError) as error:
-                if isinstance(error, HTTPError):
-                    error.close()
+                await asyncio.to_thread(self.append, batch)
+            except (OSError, ValueError) as error:
                 self.failures += 1
                 self.last_error = f"会话存储暂不可用：{type(error).__name__}"
                 if self.failures in (1, 10, 100):
@@ -114,6 +110,8 @@ class SessionRecorder:
         """研究结束：停后台循环，再尽力提交剩余条目（短暂重试）。"""
         if self.task:
             self.task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self.task
         for attempt in range(attempts):
             if await self.flush():
                 return True

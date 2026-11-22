@@ -6,11 +6,8 @@ import asyncio
 from copy import deepcopy
 import json
 import logging
-import os
 import re
 import time
-from uuid import UUID
-from urllib.request import urlopen
 
 from app.core.config import ModelServiceError
 from app.schemas.agent import AgentResearchRequest
@@ -18,25 +15,16 @@ from app.schemas.agent import Citation
 from app.schemas.discussion import FollowupAnswer
 from app.services.agent_runner import AgentRunner, context_characters
 from app.services.discussion_context import answer_history, partial_answer, report_view, saved_supplement, select_history
-from app.services.research_recovery import checkpoint_path, legacy_recovery, load_recovery, pending_calls, recovery_error
+from app.services.research_recovery import checkpoint_path, legacy_recovery, load_entries, load_recovery, pending_calls, recovery_error
 from app.services.runtime import BudgetStop, RunLimits, now
 from app.services.reading_coverage import reading_complete
-from app.services.session_recorder import DEFAULT_URL, RecordedMessages, SessionRecorder
+from app.services.session_recorder import RecordedMessages, SessionRecorder
 
 logger = logging.getLogger("path_of_market.discussion")
 
 
 class SupplementRequired(ValueError):
     """缺少本次补查证据，需要继续工具循环，不是格式修正。"""
-
-
-def load_entries(task_id):
-    base = (os.environ.get("SESSION_STORE_URL") or DEFAULT_URL).rstrip("/")
-    try:
-        with urlopen(f"{base}/runs/{UUID(task_id)}", timeout=10) as response:
-            return json.load(response)["entries"]
-    except (OSError, ValueError, KeyError):
-        raise recovery_error("无法读取已保存的研究会话，未启动模型调用。") from None
 
 
 def branch(entries, leaf):
@@ -333,6 +321,8 @@ class DiscussionRunner(AgentRunner):
         answer, version_id = None, None
         try:
             async with asyncio.timeout(self.limits.max_seconds):
+                if self.job.cancel_requested:
+                    raise asyncio.CancelledError
                 await self.load_user_memory()
                 chain = branch(self.prepared["entries"], str(self.followup_request.parent_id))
                 leaf = chain[-1]

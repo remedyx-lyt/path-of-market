@@ -42,7 +42,7 @@ try {
   assert.ok(await page.locator('.section-citations a').count() > 5)
   assert.equal(requests.filter((r) => r.method === 'POST' && r.url.includes('/api/research/jobs')).length, 0)
   assert.equal(requests.filter((r) => /127\.0\.0\.1:8000/.test(r.url)).length, 0)
-  checks.push('real completed report through Java, sources and no additional model calls')
+  checks.push('real completed report through FastAPI, sources and no additional model calls')
 
   const section = page.locator('.market-section')
   const initialPath = await section.locator('svg path').getAttribute('d')

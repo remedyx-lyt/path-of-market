@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 from io import BytesIO
 import json
+import os
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -15,6 +16,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps/agent"))
+sys.path.insert(0, str(ROOT / "apps/agent/tests"))
+from support import BASE_REQUEST, DEFAULT_SCRIPT, FakeModel
 from pypdf import PdfReader, PdfWriter
 from app.core.config import ModelSettings, ModelServiceError
 from app.schemas.agent import AgentResearchRequest
@@ -30,7 +33,7 @@ spec = importlib.util.spec_from_file_location("tool_fixtures", ROOT / "scripts/c
 fixtures = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixtures)
 SETTINGS = ModelSettings("isolated-test-key-only", "http://127.0.0.1:1", "isolated-test", 1, 1800)
-REQUEST = {"target": "同花顺", "question": "研究经营变化与行情，使用真实工具证据。", "asOfDate": "2026-10-23", "includeMarket": True, "includeCurrentPeriod": False, "includeFinancials": False}
+REQUEST = BASE_REQUEST
 
 
 def stock_data():
@@ -46,56 +49,40 @@ class FakeMarket:
         return {"company": company, "requestedStart": start, "requestedEnd": end, **stock_data()}
 
 
-class ScriptedModel:
+class ScriptedModel(FakeModel):
     def __init__(self, *, invalid_note=False, invalid_final=False, unknown_tool=False):
-        self.decisions = 0
-        self.readings = 0
-        self.invalid_note, self.invalid_final, self.unknown_tool = invalid_note, invalid_final, unknown_tool
-        self.received = []
+        script = list(DEFAULT_SCRIPT)
+        if unknown_tool:
+            script.insert(0, [("unknown_fixture_tool", {})])
+        super().__init__(script=script, ready=True)
+        self.invalid_note, self.invalid_final = invalid_note, invalid_final
+
+    @property
+    def readings(self):
+        return self.count("reading")
 
     async def __call__(self, settings, messages, **kwargs):
-        self.received.append(messages)
-        usage = {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
-        if not kwargs.get("tools"):
-            task = json.loads(messages[1]["content"])
-            if "references" in task:
-                # 研究前的方法计划（M1-4 起每次研究都会按问题/预兆选择方法）。
-                check = {"topic": "business", "question": "经营变化来自哪里", "evidenceNeeded": "年报原文",
-                         "figureIdea": "无", "methodReference": task["references"][0]["reference"]}
-                return {"role": "assistant", "content": json.dumps({"focus": "经营变化", "checks": [check] * 3, "unavailable": []},
-                                                                   ensure_ascii=False)}, usage
-            if "candidate" in task:
-                return {"role": "assistant", "content": json.dumps(task["candidate"], ensure_ascii=False)}, usage
-            self.readings += 1
-            note = {"summary": "已检查本批所有原文。", "facts": [{"text": "本批含原文数字和研究费用，需核对实际单位。",
-                "pages": [999 if self.invalid_note and self.readings == 1 else task["pages"][0]["page"]]}], "gaps": []}
-            return {"role": "assistant", "content": json.dumps(note, ensure_ascii=False)}, usage
-        if kwargs.get("tool_choice") == "none" and str(messages[-1].get("content", "")).startswith("报告正文已写好"):
-            # 写作第二步：单独生成数据表（本脚本不关心表格内容）。
-            return {"role": "assistant", "content": json.dumps({"tables": []})}, usage
-        self.decisions += 1
-        if self.unknown_tool and self.decisions == 1:
-            calls = [("bash", {"command": "must-not-execute"})]
-        elif self.decisions == (2 if self.unknown_tool else 1):
-            calls = [("find_documents", {"company": "同花顺", "years": [2024], "asOfDate": "2026-10-23"}),
-                     ("get_market_data", {"company": "同花顺", "startDate": "2024-01-01", "endDate": "2026-10-23"})]
-        elif self.decisions == (3 if self.unknown_tool else 2):
-            calls = [("read_document", {"documentId": "cninfo-1234567890", "mode": "full"})]
-        else:
-            page = 999 if self.invalid_final and self.decisions == 3 else 1
-            content = {"title": "隔离研究报告", "summary": "依据实际工具流程验证。", "sections": [
-                {"heading": "经营证据", "content": "原文记录需结合单位与年度解释。", "citations": [{"sourceId": "cninfo-1234567890", "page": page}]},
-                {"heading": "行情口径", "content": "实际价格变化与复权序列不同。", "citations": [{"sourceId": "market-300033", "page": None}]}]}
-            return {"role": "assistant", "content": json.dumps(content, ensure_ascii=False)}, usage
-        return {"role": "assistant", "content": None, "tool_calls": [
-            {"id": f"call_{self.decisions}_{i}", "type": "function", "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}}
-            for i, (name, args) in enumerate(calls)]}, usage
+        kind = self.kind(messages, kwargs)
+        message, usage = await super().__call__(settings, messages, **kwargs)
+        if kind == "reading" and self.invalid_note and self.readings == 1:
+            content = json.loads(message["content"])
+            content["facts"][0]["pages"] = [999]
+            message["content"] = json.dumps(content)
+        if kind == "section" and self.invalid_final and self.count("section") == 1:
+            content = json.loads(message["content"])
+            content["citations"][0]["sourceId"] = "unknown-source"
+            message["content"] = json.dumps(content)
+        return message, usage
 
 
 class LoopChecks(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        from app.storage import get_storage
+        self.enterContext(patch.dict(os.environ, {"SESSIONS_DIR": str(Path(self.tmp.name) / "sessions")}))
+        get_storage.cache_clear()
+        self.addCleanup(get_storage.cache_clear)
         transport = fixtures.FakeTransport()
         reader = PdfReader(BytesIO(transport.data))
         writer = PdfWriter()
@@ -123,7 +110,7 @@ class LoopChecks(unittest.IsolatedAsyncioTestCase):
             if message["role"] == "assistant" and message.get("tool_calls"):
                 ids = {c["id"] for c in message["tool_calls"]}
                 self.assertTrue(ids <= {m.get("tool_call_id") for m in runner.messages if m["role"] == "tool"})
-        self.assertEqual(len(declarations()), 6)
+        self.assertIn("read_document", {d["function"]["name"] for d in declarations()})
 
     async def test_02_full_read_tracks_split_page_without_skipping(self):
         model = ScriptedModel()
@@ -149,8 +136,8 @@ class LoopChecks(unittest.IsolatedAsyncioTestCase):
         job, runner = self.runner(model)
         await runner.run()
         self.assertEqual(job.status, "completed")
-        self.assertEqual(model.decisions, 4)
-        self.assertTrue(any("尚未通过程序核查" in m.get("content", "") for m in runner.messages if m["role"] == "user"))
+        self.assertTrue(any(e["type"] == "writing_unit_retry" for e in job.events))
+        self.assertNotIn("unknown-source", str(job.report["sections"]))
 
     async def test_05_unknown_tool_returned_as_error_then_recovers(self):
         job, runner = self.runner(ScriptedModel(unknown_tool=True))
@@ -294,7 +281,7 @@ class NativeProtocolChecks(unittest.IsolatedAsyncioTestCase):
         try:
             message, _ = await complete_turn(settings, [{"role": "user", "content": "test"}], tools=declarations(), json_mode=False)
             self.assertEqual(message["tool_calls"][0]["id"], "call_native")
-            self.assertEqual(len(state["payload"]["tools"]), 6)
+            self.assertEqual(state["payload"]["tools"], declarations())
             self.assertEqual(state["payload"]["thinking"]["type"], "disabled")
             for mode in ["length", "duplicate"]:
                 state["mode"] = mode

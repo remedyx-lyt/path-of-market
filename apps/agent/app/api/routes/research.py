@@ -1,6 +1,6 @@
 """基础健康检查、演示研究与模型分析接口。"""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -12,9 +12,10 @@ from app.services.model_client import generate_content
 from app.services.workflows.mock_research import build_mock_report
 
 router = APIRouter()
+health_router = APIRouter()
 
 
-@router.get("/health", response_model=HealthResponse, tags=["服务状态"])
+@health_router.get("/health", response_model=HealthResponse, tags=["服务状态"])
 def health() -> HealthResponse:
     """只确认应用可响应，不发起模型调用或检查外部数据源。"""
     return HealthResponse()
@@ -27,7 +28,7 @@ def research_mock(request: ResearchRequest) -> MockResearchReport:
 
 
 @router.post("/research/model", response_model=ModelResearchReport, tags=["模型研究"])
-async def research_model(request: ModelResearchRequest):
+async def research_model(request: ModelResearchRequest, http_request: Request):
     """模型生成研究思路；尚无真实资料工具或长期记忆。"""
     task_id = str(uuid4())
     started_at = datetime.now(timezone.utc).isoformat()
@@ -55,6 +56,8 @@ async def research_model(request: ModelResearchRequest):
             ),
         )
     except ModelServiceError as error:
+        if http_request.url.path.startswith("/api/"):
+            raise
         return JSONResponse(
             status_code=error.status,
             content={

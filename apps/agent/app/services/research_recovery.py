@@ -1,4 +1,4 @@
-"""执行检查点与旧 JSONL 接续。会话由 Java 保存；Python 另存可重建的执行状态，不保存密钥。
+"""执行检查点与旧 JSONL 接续。会话追加写入本地文件；另存可重建的执行状态，不保存密钥。
 
 沿用 Pi 当前 parentId 分支，context_edit 生效；参考 LangGraph 的成功步骤保留与检查点恢复。
 旧任务没有检查点时，仅恢复实际落盘的消息、覆盖和已核对数值，不把缓存目录当已读证明。
@@ -6,12 +6,10 @@
 
 from copy import deepcopy
 import json
-import os
 from uuid import UUID
-from urllib.request import urlopen
 
 from app.core.config import ModelServiceError
-from app.services.session_recorder import DEFAULT_URL
+from app.storage import get_storage
 from app.services.reading_coverage import reading_complete, update_reading_complete
 from app.tools.documents import write_json
 
@@ -150,6 +148,16 @@ def legacy_recovery(entries, task_id, *, allow_completed=False):
     }
 
 
+def load_entries(task_id):
+    try:
+        entries = get_storage().sessions.entries_for_run(task_id)
+    except (OSError, ValueError):
+        entries = None
+    if not entries:
+        raise recovery_error("无法读取已保存的研究会话，未启动模型调用。")
+    return entries
+
+
 def load_recovery(tools, task_id, *, allow_completed=False):
     path = checkpoint_path(tools, task_id)
     if path.exists():
@@ -160,12 +168,7 @@ def load_recovery(tools, task_id, *, allow_completed=False):
         if data.get("version") != 1 or data.get("taskId") != task_id:
             raise recovery_error("执行检查点版本或任务标识不匹配。")
         return data
-    base = (os.environ.get("SESSION_STORE_URL") or DEFAULT_URL).rstrip("/")
-    try:
-        with urlopen(f"{base}/runs/{UUID(task_id)}", timeout=10) as response:
-            entries = json.load(response)["entries"]
-    except (OSError, ValueError, KeyError):
-        raise recovery_error("未找到可接续的会话或存储服务不可用。") from None
+    entries = load_entries(task_id)
     return legacy_recovery(entries, task_id, allow_completed=allow_completed)
 
 

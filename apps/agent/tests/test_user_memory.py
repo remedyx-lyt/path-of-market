@@ -24,7 +24,6 @@ def memory(*, enabled=True):
 
 
 class Recorder:
-    base_url = "http://127.0.0.1:1/internal/sessions"
     def __init__(self, ok=True): self.ok, self.entries = ok, []
     def add(self, kind, **fields): self.entries.append({"type": kind, **fields}); return str(len(self.entries))
     async def flush(self): return self.ok
@@ -40,7 +39,8 @@ class UserMemory(RunnerFixture, unittest.IsolatedAsyncioTestCase):
         def request_memory(path="", body=None):
             calls.append((path, deepcopy(body)))
             return deepcopy(data if data is not None else memory()) if body is None else {"status": "suggested"}
-        runner.memory_http = request_memory
+        runner.read_memory = lambda query="", limit=20: request_memory((query, limit))
+        runner.suggest_memory = lambda body: request_memory(body=body)
         return job, runner, model, calls
 
     async def test_confirmed_preferences_and_observations_are_distinct(self):
@@ -79,7 +79,7 @@ class UserMemory(RunnerFixture, unittest.IsolatedAsyncioTestCase):
     async def test_unavailable_memory_does_not_abort_research(self):
         job, runner, _, _ = self.setup_memory()
         def failure(*args): raise ToolError("MEMORY_UNAVAILABLE", "temporary")
-        runner.memory_http = failure
+        runner.read_memory = failure
         await runner.run()
         self.assertEqual(job.status, "completed", job.error)
         self.assertTrue(any(e["type"] == "memory_unavailable" for e in job.events))
@@ -104,7 +104,7 @@ class UserMemory(RunnerFixture, unittest.IsolatedAsyncioTestCase):
     async def test_recall_is_keyword_query_without_model_or_pdf_reread(self):
         job, runner, model, calls = self.setup_memory()
         result = await runner.dispatch("recall_user_memory", {"query": "同花顺", "limit": 2})
-        self.assertIn("query=%E5%90%8C%E8%8A%B1%E9%A1%BA", calls[-1][0])
+        self.assertEqual(calls[-1][0][0], "同花顺")
         self.assertEqual(result["episodes"][0]["question"], "比较现金流")
         self.assertEqual(job.model_calls, 0)
         self.assertFalse(model.calls)

@@ -1,6 +1,7 @@
 """迁移后的本地存储：固定 v1 样本、故障重试与同进程并发。只使用临时目录。"""
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -12,6 +13,7 @@ from uuid import uuid4
 
 AGENT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(AGENT))
+from app.storage import writer_lease
 from app.storage.memory import MemoryConflict, MemoryStore, MemoryUnavailable
 from app.storage.sessions import SessionStore
 
@@ -31,6 +33,14 @@ class LocalStorage(unittest.TestCase):
         self.row = {"type": "event", "id": "event-1", "runId": self.run, "parentId": None,
                     "data": {"type": "model_finished", "message": "已取证", "id": "e1"}}
         self.file = self.directory / (self.session + ".jsonl")
+
+    def test_only_one_backend_can_open_a_session_directory(self):
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {"SESSIONS_DIR": directory}):
+            with writer_lease():
+                with self.assertRaises(RuntimeError), writer_lease():
+                    pass
+            with writer_lease():
+                self.assertTrue(Path(directory, ".writer.lock").is_file())
 
     def test_reads_frozen_files_without_rewriting(self):
         shutil.copytree(FIXTURES, self.directory, dirs_exist_ok=True)

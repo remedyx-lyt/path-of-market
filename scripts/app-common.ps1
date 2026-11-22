@@ -3,10 +3,35 @@ $taskAppRoot = Split-Path -Parent $PSScriptRoot
 $taskRuntimeRoot = Join-Path $taskAppRoot '.runtime'
 $taskAppStatePath = Join-Path $taskRuntimeRoot 'app-state.json'
 $taskAppServices = @(
-    @{ Name = 'agent'; Port = 8000; Script = 'start-agent.ps1'; Health = 'http://127.0.0.1:8000/health' },
-    @{ Name = 'server'; Port = 8080; Script = 'start-server.ps1'; Health = 'http://127.0.0.1:8080/api/health' },
-    @{ Name = 'web'; Port = 5173; Script = 'start-web.ps1'; Health = 'http://127.0.0.1:5173/' }
+    @{ Name = 'server'; Port = 8080; Alternate = 8081; Script = 'start-agent.ps1'; Health = 'http://127.0.0.1:8080/api/health' },
+    @{ Name = 'web'; Port = 5173; Alternate = 4173; Script = 'start-web.ps1'; Health = 'http://127.0.0.1:5173/' }
 )
+
+function Set-AppPort {
+    param($Service, [int]$Port)
+    $taskUri = [UriBuilder]$Service.Health
+    $taskUri.Port = $Port
+    $Service.Port = $Port
+    $Service.Health = $taskUri.Uri.AbsoluteUri
+}
+
+function Find-AppPort {
+    param([int]$Preferred, [int]$Alternate)
+    # Windows 保留端口没有监听进程。优先选择固定备用端口，使网页地址在重启后保持稳定。
+    foreach ($taskCandidate in @($Preferred, $Alternate, 0)) {
+        $taskProbe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $taskCandidate)
+        try {
+            $taskProbe.Start()
+            return $taskProbe.LocalEndpoint.Port
+        }
+        catch [Net.Sockets.SocketException] {
+            if ($taskCandidate -eq 0 -or
+                ($taskCandidate -eq $Preferred -and $_.Exception.SocketErrorCode -ne 'AccessDenied') -or
+                $_.Exception.SocketErrorCode -notin @('AccessDenied', 'AddressAlreadyInUse')) { throw }
+        }
+        finally { $taskProbe.Stop() }
+    }
+}
 
 function Enter-AppOperation {
     New-Item -ItemType Directory -Path $taskRuntimeRoot -Force | Out-Null
@@ -23,16 +48,24 @@ function Enter-AppOperation {
 function Get-AppState {
     if (-not (Test-Path -LiteralPath $taskAppStatePath)) { return $null }
     $taskState = Get-Content -LiteralPath $taskAppStatePath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($taskState.version -ne 1 -or $taskState.projectRoot -ne $taskAppRoot) {
+    if ($taskState.version -notin @(1, 2) -or $taskState.projectRoot -ne $taskAppRoot) {
         throw '启动记录与当前项目不符，请先检查 .runtime/app-state.json。'
+    }
+    $taskSpecs = $taskAppServices
+    if ($taskState.version -eq 1) {
+        $taskSpecs = @(@{ Name = 'agent'; Script = 'start-agent.ps1' },
+            @{ Name = 'server'; Script = 'start-server.ps1' }, @{ Name = 'web'; Script = 'start-web.ps1' })
     }
     $taskSeenNames = @()
     foreach ($taskEntry in @($taskState.services)) {
-        $taskSpec = $taskAppServices | Where-Object { $_.Name -eq $taskEntry.name }
+        $taskSpec = $taskSpecs | Where-Object { $_.Name -eq $taskEntry.name }
         if (-not $taskSpec -or $taskSeenNames -contains $taskEntry.name -or
             $taskEntry.scriptPath -ne (Join-Path $PSScriptRoot $taskSpec.Script) -or
             $taskEntry.processId -le 0) {
             throw '启动记录中的服务不符合约定，请检查 .runtime/app-state.json。'
+        }
+        if ($taskState.version -eq 2 -and $taskEntry.port) {
+            if ($taskEntry.port -lt 1 -or $taskEntry.port -gt 65535) { throw '启动记录端口无效。' }
         }
         $taskSeenNames += $taskEntry.name
     }
@@ -41,7 +74,7 @@ function Get-AppState {
 
 function Save-AppState {
     param([object[]]$Services)
-    $taskState = @{ version = 1; projectRoot = $taskAppRoot; services = @($Services) }
+    $taskState = @{ version = 2; projectRoot = $taskAppRoot; services = @($Services) }
     $taskTempState = Join-Path $taskRuntimeRoot 'app-state.tmp'
     $taskState | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $taskTempState -Encoding UTF8
     Move-Item -LiteralPath $taskTempState -Destination $taskAppStatePath -Force
@@ -53,10 +86,10 @@ function Get-AppManagedProcess {
     if (-not $taskProcess) { return $null }
     $taskCim = Get-CimInstance Win32_Process -Filter "ProcessId = $($Entry.processId)"
     # PID 会复用：必须同时核对创建时间、可执行文件和启动脚本。
-    if ($taskProcess.StartTime.ToUniversalTime().ToString('o') -ne $Entry.startedAtUtc -or
-        $taskProcess.Path -ne $Entry.executablePath -or -not $taskCim -or
+    if (-not $taskProcess.StartTime -or $taskProcess.StartTime.ToUniversalTime().ToString('o') -ne $Entry.startedAtUtc -or
+        $taskProcess.Path -ne $Entry.executablePath -or -not $taskCim.CommandLine -or
         $taskCim.CommandLine.IndexOf($Entry.scriptPath, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
-        throw "服务 $($Entry.name) 的进程身份已变化；没有操作该进程。请检查启动记录。"
+        return $null
     }
     return $taskProcess
 }
@@ -100,8 +133,7 @@ function Test-AppServiceReady {
             return ($taskPage.StatusCode -eq 200 -and $taskPage.Content -match 'id="root"')
         }
         $taskHealth = Invoke-RestMethod -Uri $Service.Health -TimeoutSec 2
-        return ($taskHealth.status -eq 'ok' -and $taskHealth.service -eq $Service.Name -and
-            ($Service.Name -ne 'agent' -or $taskHealth.mode -eq 'mock'))
+        return ($taskHealth.status -eq 'ok' -and $taskHealth.service -eq $Service.Name)
     }
     catch { return $false }
 }

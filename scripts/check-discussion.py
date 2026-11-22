@@ -1,15 +1,14 @@
-"""真实 Java→FastAPI→Agent工具→JSONL 集成检查，使用隔离资料/脚本模型，绝不读取真实密钥。
+"""真实 FastAPI→Agent工具→JSONL 集成检查，使用隔离资料/脚本模型，绝不读取真实密钥。
 
 临时服务只绑定127.0.0.1随机端口；隔离会话和检查点在.runtime/qa/discussion。
 """
 import asyncio
-import importlib.util
+from backend_contract.qa_server import request, start_python
 import json
 import os
 import re
 from pathlib import Path
 import socket
-import shutil
 import subprocess
 import sys
 import time
@@ -94,6 +93,8 @@ def worker(port):
             profile = next(json.loads(m["content"]) for m in messages if m["role"] == "user" and isinstance(m.get("content"), str) and m["content"].startswith('{"type": "user_research_memory"'))
             answer["answer"] += "；实际确认偏好：" + json.dumps(profile["confirmedPreferences"], ensure_ascii=False)
         if query == "QA_BAD_CITATION" and not any("请修正回复" in str(m.get("content")) for m in messages):
+            answer["citations"][0]["sourceId"] = "unread-source"
+        if query == "QA_BAD_PAGE":
             answer["citations"][0]["page"] = 999
         if query == "QA_STREAM" and kwargs.get("on_text"):
             kwargs["on_text"]('{"answer":"正在分段生成回答')
@@ -133,29 +134,22 @@ def free_port():
 
 
 def main():
-    spec = importlib.util.spec_from_file_location("session_checks", ROOT / "scripts/check-sessions.py")
-    bridge = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(bridge)
-    bridge.FOLDER = FOLDER
     FOLDER.mkdir(parents=True, exist_ok=True)
-    # 隔离服务使用JAR副本，避免Windows锁住正式构建产物，影响应用启动/打包。
-    bridge.JAR_PATH = FOLDER / "server.jar"
-    shutil.copy2(ROOT / "apps/server/target/path-of-market-server.jar", bridge.JAR_PATH)
-    provider_port, java_port = free_port(), free_port()
-    provider_base = f"http://127.0.0.1:{provider_port}"
-    environment = {**os.environ, "SESSION_STORE_URL": f"http://127.0.0.1:{java_port}/internal/sessions"}
+    port = free_port()
+    base = f"http://127.0.0.1:{port}"
+    sessions = FOLDER / "sessions" / str(uuid4())
+    environment = {**os.environ, "SESSIONS_DIR": str(sessions)}
     agent_log = (FOLDER / "agent.log").open("ab")
-    process, log, agent = None, None, None
+    agent = None
 
     def start_agent():
-        result = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--worker", str(provider_port)], cwd=ROOT,
-            env=environment, stdout=agent_log, stderr=subprocess.STDOUT,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        result = start_python([str(Path(__file__).resolve()), "--worker", str(port)], cwd=ROOT,
+            env=environment, stdout=agent_log, stderr=subprocess.STDOUT)
         for _ in range(100):
             if result.poll() is not None:
                 raise RuntimeError("隔离Python启动失败，见.runtime/qa/discussion/agent.log")
             try:
-                if bridge.request(provider_base, "/qa/calls")[0] == 200:
+                if request(base, "/qa/calls")[0] == 200:
                     return result
             except OSError:
                 pass
@@ -170,60 +164,59 @@ def main():
 
     try:
         agent = start_agent()
-        process, base, log = bridge.start_java(java_port, provider_port)
-        _, seed = bridge.request(provider_base, "/qa/seed", "POST", {})
+        _, seed = request(base, "/qa/seed", "POST", {})
         # 独立旧研究用于验证跨会话回查；不能只从当前报告的另一分支取经历。
-        bridge.request(provider_base, "/qa/seed", "POST", {})
+        request(base, "/qa/seed", "POST", {})
         task, root = seed["taskId"], seed["nodeId"]
         prefix = f"/api/research/jobs/{task}"
-        _, original = bridge.request(base, prefix + "/discussion")
-        check("初版报告可读取，查看不调用模型", len(original["versions"]) == 1 and bridge.request(provider_base, "/qa/calls")[1]["calls"] == 0)
+        _, original = request(base, prefix + "/discussion")
+        check("初版报告可读取，查看不调用模型", len(original["versions"]) == 1 and request(base, "/qa/calls")[1]["calls"] == 0)
 
         def send(message, node=root, action="ask", body=None):
             body = body or {"message": message, "parentId": node, "action": action, "requestId": str(uuid4())}
-            status, snapshot = bridge.request(base, prefix + "/chat", "POST", body)
+            status, snapshot = request(base, prefix + "/chat", "POST", body)
             assert status in (200, 202), (status, snapshot)
             for _ in range(180):
-                _, snapshot = bridge.request(base, f"/api/research/jobs/{snapshot['taskId']}")
+                _, snapshot = request(base, f"/api/research/jobs/{snapshot['taskId']}")
                 if snapshot["status"] not in {"queued", "running"} and not (snapshot.get("persistence") or {}).get("unsent"):
                     break
                 time.sleep(0.1)
             else:
                 raise AssertionError("对话未按时结束")
-            _, discussion = bridge.request(base, prefix + "/discussion")
+            _, discussion = request(base, prefix + "/discussion")
             turn = next(t for t in discussion["turns"] if t["runId"] == snapshot["taskId"])
             return snapshot, turn, discussion
 
         first, first_turn, discussion = send("QA_FIRST")
-        check("Java→Python异步追问完成并落盘", first["status"] == "completed" and first_turn["answer"] and len(discussion["versions"]) == 1)
-        status, streaming = bridge.request(base, prefix + "/chat", "POST", {
+        check("FastAPI异步追问完成并落盘", first["status"] == "completed" and first_turn["answer"] and len(discussion["versions"]) == 1)
+        status, streaming = request(base, prefix + "/chat", "POST", {
             "message": "QA_STREAM", "action": "ask", "parentId": root, "requestId": str(uuid4())})
         live_draft = None
         for _ in range(30):
-            _, snapshot = bridge.request(base, f"/api/research/jobs/{streaming['taskId']}")
+            _, snapshot = request(base, f"/api/research/jobs/{streaming['taskId']}")
             if (snapshot.get("followup") or {}).get("draft"):
                 live_draft = snapshot
                 break
             time.sleep(.1)
-        check("Java→Python实际轮询可见尚未校验的流式回答", status == 202 and live_draft is not None
+        check("FastAPI实际轮询可见尚未校验的流式回答", status == 202 and live_draft is not None
               and live_draft['followup']['answer'] == '正在分段生成回答' and live_draft['status'] == 'running')
         for _ in range(80):
-            _, finished_stream = bridge.request(base, f"/api/research/jobs/{streaming['taskId']}")
+            _, finished_stream = request(base, f"/api/research/jobs/{streaming['taskId']}")
             if finished_stream['status'] not in {'queued', 'running'} and not (finished_stream.get('persistence') or {}).get('unsent'):
                 break
             time.sleep(.1)
         check("流式草稿经最终校验后保存为正式对话", finished_stream['status'] == 'completed'
               and not (finished_stream.get('followup') or {}).get('draft'))
-        status, profile = bridge.request(base, "/api/research/memory", "POST", {"revision": bridge.request(base, "/api/research/memory")[1]["revision"],
+        status, profile = request(base, "/api/research/memory", "POST", {"revision": request(base, "/api/research/memory")[1]["revision"],
             "action": "save", "text": "已确认：优先核对现金流", "category": "research_preference"})
-        check("单用户偏好可通过Java保存", status == 200 and any(n["text"] == "已确认：优先核对现金流" for n in profile["notes"]))
+        check("单用户偏好可通过公开接口保存", status == 200 and any(n["text"] == "已确认：优先核对现金流" for n in profile["notes"]))
         memory_job, memory_turn, _ = send("QA_MEMORY_CHECK")
         check("真实模型调用输入带跨会话确认偏好，不只是界面存字段", memory_job["status"] == "completed" and "已确认：优先核对现金流" in memory_turn["answer"]
             and any(e["type"] == "memory_loaded" for e in memory_job["events"]))
         recalled_memory, _, _ = send("QA_MEMORY_RECALL")
         check("模型可实际调用跨会话研究记忆回查工具", recalled_memory["status"] == "completed" and any(e["type"] == "tool_finished" and e.get("name") == "recall_user_memory" and e.get("status") == "completed" for e in recalled_memory["events"]))
         remembered, _, _ = send("QA_MEMORY_REMEMBER 以后先解释现金流再给反方证据")
-        check("实际对话工具保存带本次原话的偏好候选", remembered["status"] == "completed" and any(n["status"] == "suggested" and n["quote"] == "以后先解释现金流再给反方证据" for n in bridge.request(base, "/api/research/memory")[1]["notes"]))
+        check("实际对话工具保存带本次原话的偏好候选", remembered["status"] == "completed" and any(n["status"] == "suggested" and n["quote"] == "以后先解释现金流再给反方证据" for n in request(base, "/api/research/memory")[1]["notes"]))
         revised, revised_turn, discussion = send("QA_REVISE", first_turn["id"], "revise")
         v2 = discussion["versions"][-1]
         check("局部修订另存V2，原报告逐字段不变", revised["status"] == "completed" and v2["reportVersion"] == 2 and discussion["versions"][0] == original["versions"][0])
@@ -237,7 +230,10 @@ def main():
         transient, _, _ = send("QA_TRANSIENT")
         check("暂时模型超时在当前节点重试", transient["status"] == "completed" and any(e["type"] == "writing_unit_retry" for e in transient["events"]))
         invalid, invalid_turn, _ = send("QA_BAD_CITATION")
-        check("未读页引用被拒绝，修正后才保存", invalid["status"] == "completed" and invalid_turn["citations"][0]["page"] == 1 and any(e["type"] == "report_validation_failed" for e in invalid["events"]))
+        check("未读来源被拒绝，修正后才保存", invalid["status"] == "completed" and invalid_turn["citations"][0]["page"] == 1 and any(e["type"] == "report_validation_failed" for e in invalid["events"]))
+        page_job, page_turn, _ = send("QA_BAD_PAGE")
+        check("已读来源的越界页码从回答中移除", page_job["status"] == "completed"
+              and page_turn["citations"] == [{"sourceId": first_turn["citations"][0]["sourceId"], "page": None}])
         failed, failure, discussion = send("QA_FAIL_AUTH")
         check("账户错误停止，原报告及版本保留", failed["status"] == "failed" and failure["status"] == "failed" and len(discussion["versions"]) == 2)
         recovered, _, _ = send("QA_RECOVER", failure["id"])
@@ -246,12 +242,12 @@ def main():
         check("新增章节同时补齐图表计划，避免前端拒收", appended["status"] == "completed" and len(discussion["versions"][-1]["report"]["sections"]) == len(discussion["versions"][-1]["report"]["figurePlan"]) == 3)
         body = {"message": "QA_DEDUPE", "parentId": root, "action": "ask", "requestId": str(uuid4())}
         deduped, _, _ = send("", body=body)
-        before = bridge.request(provider_base, "/qa/calls")[1]["calls"]
+        before = request(base, "/qa/calls")[1]["calls"]
         repeated, _, _ = send("", body=body)
-        check("POST重复投递复用原任务、不重复计费", repeated["taskId"] == deduped["taskId"] and bridge.request(provider_base, "/qa/calls")[1]["calls"] == before)
-        status, _ = bridge.request(base, prefix + "/chat", "POST", {**body, "requestId": str(uuid4()), "parentId": str(uuid4())})
-        check("不存在的分支在调用模型前拒绝", status == 409 and bridge.request(provider_base, "/qa/calls")[1]["calls"] == before)
-        status, _ = bridge.request(base, prefix + "/chat", "POST", {**body, "message": " "})
+        check("POST重复投递复用原任务、不重复计费", repeated["taskId"] == deduped["taskId"] and request(base, "/qa/calls")[1]["calls"] == before)
+        status, _ = request(base, prefix + "/chat", "POST", {**body, "requestId": str(uuid4()), "parentId": str(uuid4())})
+        check("不存在的分支在调用模型前拒绝", status == 409 and request(base, "/qa/calls")[1]["calls"] == before)
+        status, _ = request(base, prefix + "/chat", "POST", {**body, "message": " "})
         check("空问题在边界返回422", status == 422)
 
         compacted_turn = first_turn
@@ -265,10 +261,11 @@ def main():
         check("连续真实HTTP追问自动触发摘要后仍回答成功", compacted_job is not None and "QA_FIRST" in compacted_turn["answer"])
         event = next(e for e in compacted_job["events"] if e["type"] == "compaction_completed")
         check("上下文实际缩小，报告、原页阅读覆盖不变", event["afterCharacters"] < event["beforeCharacters"] * 0.9 and compacted_job["coverage"] == first["coverage"]
-            and bridge.request(base, prefix + "/discussion")[1]["versions"][0] == original["versions"][0])
-        _, persisted = bridge.request(base, f"/internal/sessions/runs/{compacted_job['taskId']}")
-        marker = next(e for e in persisted["entries"] if e["type"] == "compaction" and not e.get("restored"))
-        check("Java保留摘要边界与完整旧对话JSONL", marker.get("firstKeptEntryId") and any(e.get("message", {}).get("content") == "QA_FIRST" for e in persisted["entries"]))
+            and request(base, prefix + "/discussion")[1]["versions"][0] == original["versions"][0])
+        session_file = sessions / f"{compacted_job['sessionId']}.jsonl"
+        entries = [json.loads(line) for line in session_file.read_text(encoding="utf-8").splitlines()]
+        marker = next(e for e in entries if e["type"] == "compaction" and not e.get("restored"))
+        check("存储保留摘要边界与完整旧对话JSONL", marker.get("firstKeptEntryId") and any(e.get("message", {}).get("content") == "QA_FIRST" for e in entries))
         recalled, recall_turn, _ = send("QA_RECALL", compacted_turn["id"])
         check("压缩后可真实调用本地笔记回查工具，无需重新通读", recalled["status"] == "completed" and any(e["type"] == "tool_finished" and e.get("name") == "recall_research_context" and e.get("status") == "completed" for e in recalled["events"]))
         # 暂时移走本次检查点，实际验证仅JSONL降级也沿所选父链恢复摘要。
@@ -283,34 +280,32 @@ def main():
 
         agent.terminate(); agent.wait(timeout=10)
         agent = start_agent()
-        bridge.stop_java(process, log); process, log = None, None
-        process, base, log = bridge.start_java(java_port, provider_port)
-        _, saved = bridge.request(base, prefix + "/discussion")
-        _, restored = bridge.request(base, f"/api/research/jobs/{deduped['taskId']}")
-        check("Java/Python重启后报告版本、对话与任务均可恢复查看", len(saved["versions"]) == 3 and restored["status"] == "completed" and restored["followup"]["answer"])
+        _, saved = request(base, prefix + "/discussion")
+        _, restored = request(base, f"/api/research/jobs/{deduped['taskId']}")
+        check("后端重启后报告版本、对话与任务均可恢复查看", len(saved["versions"]) == 3 and restored["status"] == "completed" and restored["followup"]["answer"])
         restart_job, restart_turn, _ = send("QA_AFTER_RESTART", revised_turn["id"])
         check("重启后沿旧分支继续问，复用证据与历史", restart_job["status"] == "completed" and "QA_FIRST" in restart_turn["answer"] and "QA_SIBLING" not in restart_turn["answer"])
         memory_after, memory_after_turn, _ = send("QA_MEMORY_CHECK")
-        check("双服务重启后新对话仍真正读取长期确认偏好", memory_after["status"] == "completed" and "已确认：优先核对现金流" in memory_after_turn["answer"])
-        before = bridge.request(provider_base, "/qa/calls")[1]["calls"]
-        status, _ = bridge.request(base, prefix + "/chat", "POST", body)
-        check("重启后相同请求标识也不会重启收费调用", status == 409 and bridge.request(provider_base, "/qa/calls")[1]["calls"] == before)
+        check("后端重启后新对话仍真正读取长期确认偏好", memory_after["status"] == "completed" and "已确认：优先核对现金流" in memory_after_turn["answer"])
+        before = request(base, "/qa/calls")[1]["calls"]
+        status, _ = request(base, prefix + "/chat", "POST", body)
+        check("重启后相同请求标识也不会重启收费调用", status == 409 and request(base, "/qa/calls")[1]["calls"] == before)
         continued, continued_turn, _ = send("QA_COMPACT_RESTART", fallback_turn["id"])
-        check("双服务重启后复用摘要继续，旧分支目标与笔记仍可用", continued["status"] == "completed" and "QA_FIRST" in continued_turn["answer"]
+        check("后端重启后复用摘要继续，旧分支目标与笔记仍可用", continued["status"] == "completed" and "QA_FIRST" in continued_turn["answer"]
             and "QA_SIBLING" not in continued_turn["answer"] and not any(e["type"] == "compaction_started" for e in continued["events"]))
-        _, interrupted = bridge.request(base, prefix + "/chat", "POST", {"message": "QA_INTERRUPT", "parentId": root, "action": "ask", "requestId": str(uuid4())})
+        _, interrupted = request(base, prefix + "/chat", "POST", {"message": "QA_INTERRUPT", "parentId": root, "action": "ask", "requestId": str(uuid4())})
         agent.kill(); agent.wait(timeout=10)
-        _, saved_pending = bridge.request(base, prefix + "/discussion")
-        pending = next(t for t in saved_pending["turns"] if t["runId"] == interrupted["taskId"])
-        _, interrupted_snapshot = bridge.request(base, f"/api/research/jobs/{interrupted['taskId']}")
-        check("进程硬中断后，已提交的请求仍可查看且标明中断", pending["status"] == "pending" and interrupted_snapshot["status"] == "failed")
         agent = start_agent()
+        _, saved_pending = request(base, prefix + "/discussion")
+        pending = next(t for t in saved_pending["turns"] if t["runId"] == interrupted["taskId"])
+        _, interrupted_snapshot = request(base, f"/api/research/jobs/{interrupted['taskId']}")
+        check("进程硬中断后，已提交的请求仍可查看且标明中断", pending["status"] == "pending" and interrupted_snapshot["status"] == "failed")
         recovered_interrupt, _, _ = send("QA_INTERRUPT_RECOVER", pending["id"])
         check("硬中断请求可从保存节点恢复，缺少新检查点时复用基础报告", recovered_interrupt["status"] == "completed")
-        _, cancellable = bridge.request(base, prefix + "/chat", "POST", {"message": "QA_INTERRUPT", "parentId": root, "action": "ask", "requestId": str(uuid4())})
-        status, cancelled = bridge.request(base, f"/api/research/jobs/{cancellable['taskId']}", "DELETE")
+        _, cancellable = request(base, prefix + "/chat", "POST", {"message": "QA_INTERRUPT", "parentId": root, "action": "ask", "requestId": str(uuid4())})
+        status, cancelled = request(base, f"/api/research/jobs/{cancellable['taskId']}", "DELETE")
         for _ in range(60):
-            _, cancelled = bridge.request(base, f"/api/research/jobs/{cancellable['taskId']}")
+            _, cancelled = request(base, f"/api/research/jobs/{cancellable['taskId']}")
             if cancelled["status"] == "cancelled" and not (cancelled.get("persistence") or {}).get("unsent"):
                 break
             time.sleep(0.1)
@@ -318,8 +313,6 @@ def main():
         (FOLDER / "result.json").write_text(json.dumps({"checks": checks, "discussion": saved, "compactionJob": compacted_job}, ensure_ascii=False), encoding="utf-8")
         print(f"{len(checks)}项隔离集成检查通过；真实模型调用0次。", flush=True)
     finally:
-        if process:
-            bridge.stop_java(process, log)
         if agent and agent.poll() is None:
             agent.terminate(); agent.wait(timeout=10)
         agent_log.close()

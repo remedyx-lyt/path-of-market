@@ -169,7 +169,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   MODEL_INVALID_RESPONSE: '模型未返回完整且有效的报告，请重试或调整输出长度。',
 }
 
-/** 浏览器只请求同源 Java API；限制完整响应等待时间，支持主动取消。 */
+/** 浏览器只请求同源研究 API；限制完整响应等待时间，支持主动取消。 */
 export async function generateReport(draft: ResearchDraft, signal: AbortSignal, mode: ResearchMode, asOfDate: string, onProgress?: (job: ResearchJob) => void): Promise<ResearchReport> {
   if (mode === 'agent') return generateAgentReport(draft, signal, asOfDate, onProgress)
   const controller = new AbortController()

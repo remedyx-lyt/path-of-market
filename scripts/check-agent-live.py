@@ -1,4 +1,4 @@
-"""经网页代理→Java→Python 实际执行研究；--live 才调用模型账户。"""
+"""经网页代理→FastAPI 实际执行研究；--live 才调用模型账户。"""
 
 import argparse
 from datetime import date
@@ -78,7 +78,7 @@ if __name__ == "__main__":
                 if args.require_financials:
                     assert report.get('financialData',{}).get('datasets') and report.get('visualReadings') and report.get('researchSkill')
                     assert any(d['id']=='annual' for d in report['financialData']['datasets'])
-                print("PASS live web → Java → Python → model/tools → report", flush=True)
+                print("PASS live web → FastAPI → model/tools → report", flush=True)
                 raise SystemExit(0)
             raise SystemExit(1)
         time.sleep(2)

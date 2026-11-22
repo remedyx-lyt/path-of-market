@@ -1,14 +1,10 @@
-"""M2-2：跨会话的单用户研究记忆。Java保存，Python按需注入/回查/提出带原话的候选。"""
+"""M2-2：跨会话的单用户研究记忆。本地保存，按需注入/回查/提出带原话的候选。"""
 import asyncio
-import json
 from typing import Literal
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.tools.contracts import ToolError
+from app.storage import get_storage
 
 
 class RecallUserMemoryArguments(BaseModel):
@@ -81,24 +77,19 @@ class UserMemoryMixin:
     def memory_root_id(self):
         return getattr(self, "prepared", {}).get("rootTaskId", self.job.task_id)
 
-    def memory_http(self, path="", body=None):
+    def read_memory(self, query="", limit=20):
         if not self.job.recorder:
             raise ToolError("MEMORY_UNAVAILABLE", "当前运行未连接持久化记忆服务。")
-        base = self.job.recorder.base_url.rsplit("/sessions", 1)[0] + "/research/memory"
-        request = Request(base + path, data=json.dumps(body, ensure_ascii=False).encode() if body is not None else None,
-                          headers={"Content-Type": "application/json"})
         try:
-            with urlopen(request, timeout=3) as response:
-                result = json.load(response)
-            if not isinstance(result, dict):
-                raise ValueError("记忆响应结构无效")
-            return result
-        except HTTPError as error:
-            code = error.code
-            error.close()
-            raise ToolError("MEMORY_UNAVAILABLE", f"记忆服务返回{code}，原研究继续；未声称记忆已保存。") from None
-        except (OSError, URLError, ValueError):
-            raise ToolError("MEMORY_UNAVAILABLE", "记忆服务暂不可用，原研究和报告保留。") from None
+            return get_storage().snapshot(query, limit, self.memory_root_id())
+        except (OSError, ValueError) as error:
+            raise ToolError("MEMORY_UNAVAILABLE", "记忆暂不可用，原研究和报告保留。") from error
+
+    def suggest_memory(self, body):
+        try:
+            return get_storage().suggest(body)
+        except (OSError, ValueError) as error:
+            raise ToolError("MEMORY_UNAVAILABLE", "未能保存研究偏好建议。") from error
 
     async def load_user_memory(self):
         if self.memory_loaded:
@@ -107,8 +98,7 @@ class UserMemoryMixin:
         if not self.job.recorder:
             return
         try:
-            path = "?" + urlencode({"excludeRoot": self.memory_root_id()})
-            self.user_memory = MemorySnapshot.model_validate(await asyncio.to_thread(self.memory_http, path)).model_dump()
+            self.user_memory = MemorySnapshot.model_validate(await asyncio.to_thread(self.read_memory)).model_dump()
             if not self.user_memory.get("enabled", False):
                 self.job.emit("memory_disabled", "研究记忆已关闭，本次不使用跨会话偏好")
                 return
@@ -139,8 +129,7 @@ class UserMemoryMixin:
     async def recall_user_memory(self, arguments):
         args = RecallUserMemoryArguments.model_validate(arguments)
         try:
-            data = MemorySnapshot.model_validate(await asyncio.to_thread(self.memory_http, "?" + urlencode({"query": args.query, "limit": args.limit,
-                                                       "excludeRoot": self.memory_root_id()}))).model_dump()
+            data = MemorySnapshot.model_validate(await asyncio.to_thread(self.read_memory, args.query, args.limit)).model_dump()
         except (ValueError, KeyError, TypeError):
             raise ToolError("MEMORY_UNAVAILABLE", "记忆格式不完整，未采用错误画像。") from None
         if not data.get("enabled"):
@@ -160,7 +149,7 @@ class UserMemoryMixin:
             raise ToolError("MEMORY_DISABLED", "本次未启用研究记忆，未保存建议。")
         if not self.job.recorder or not await self.job.recorder.flush():
             raise ToolError("MEMORY_UNAVAILABLE", "用户输入尚未保存，未提交偏好建议。")
-        result = await asyncio.to_thread(self.memory_http, "/suggestions", {"runId": self.job.task_id, **args.model_dump()})
+        result = await asyncio.to_thread(self.suggest_memory, {"runId": self.job.task_id, **args.model_dump()})
         if result.get("status") not in {"suggested", "already_recorded"}:
             raise ToolError("MEMORY_UNAVAILABLE", "记忆服务未确认保存状态，未声称建议已保存。")
         self.job.emit("memory_suggested", "研究偏好建议已提交（重复建议不再新增）；可在研究记忆中确认或修改")

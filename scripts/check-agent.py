@@ -70,13 +70,13 @@ def check(base_url: str) -> None:
     assert status == 200 and b"swagger" in body.lower()
     status, body = request(base_url, "/openapi.json")
     schema = json.loads(body)
-    assert status == 200 and "/health" in schema["paths"] and "/research/mock" in schema["paths"]
+    assert status == 200 and "/health" in schema["paths"] and "/api/research/mock" in schema["paths"]
     print("PASS API docs and OpenAPI")
     print("M0-1 HTTP checks passed.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="http://127.0.0.1:8000")
+    parser.add_argument("--base-url", default="http://127.0.0.1:8080")
     args = parser.parse_args()
     check(args.base_url)
