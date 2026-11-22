@@ -26,19 +26,20 @@ Path of Market（市场之路）是一个包含研究 Agent 的个人财经研�
             -> Data Provider / 本地资料 / 数据 API
 ```
 
-## 三个应用
+## 当前两个应用
 
 | 应用 | 技术 | 职责 |
 | --- | --- | --- |
 | `apps/web` | React + Vite + TypeScript | 页面、表单、按钮、报告展示、用户交互 |
-| `apps/server` | Java + Spring Boot | 主 API、数据库、用户画像、研究日志、观察池、任务状态 |
-| `apps/agent` | Python + FastAPI | LLM 调用、RAG、文档解析、工具调用、Agent 工作流 |
+| `apps/agent` | Python + FastAPI | 对外 API、任务、会话 JSONL 与用户记忆存储、LLM 调用、文档解析、工具调用、Agent 工作流 |
+
+2026-11 起原 `apps/server`（Java + Spring Boot，负责 API 转发、会话与记忆存储）已并入 FastAPI，旧会话与检查点可直接读取，见[后端兼容说明](backend-compatibility.md)。
 
 ## 研究运行架构与报告能力
 
 `research-runtime-plan.md` 将现有分层进一步拆为 ContextBuilder、ModelAdapter、ToolRegistry/Executor、Runner、研究状态与记忆、ReportComposer 和图表渲染。各部件标明当前状态与实施阶段；这是补充设计，三应用架构与原阶段顺序不变。
 
-Agent 核心机制先核对成熟开源实现或官方文档，依据与状态见 `agent-design-decisions.md`。按用户要求采用 JSONL 追加会话、节点父关系与当前分支上下文方向：Python 产生事件，Java SessionStore 负责业务持久化；会话与恢复分阶段实现。所有选定原始资料默认完整分批阅读，记录实际覆盖，关键词只作回查。
+Agent 核心机制先核对成熟开源实现或官方文档，依据与状态见 `agent-design-decisions.md`。按用户要求采用 JSONL 追加会话、节点父关系与当前分支上下文方向：Python 产生事件并由同进程的共享存储追加 JSONL（2026-11 之前由 Java SessionStore 负责）；会话与恢复分阶段实现。所有选定原始资料默认完整分批阅读，记录实际覆盖，关键词只作回查。
 
 正式研究报告需要有来源的表格与图表，长报告采用分章生成、保存、整合和续写。上下文窗口、单次输出与整份研究预算分别管理；当前 M1-1 的短 JSON 与单次 token 校验不是最终报告规格。
 
@@ -48,9 +49,8 @@ Agent 核心机制先核对成熟开源实现或官方文档，依据与状态�
 
 ## 关键原则
 
-- 前端通常只调用 Java 主后端，不直接调用 Python Agent 服务。
-- Java 主后端是系统中枢，负责稳定业务和数据持久化。
-- Python Agent 服务是智能能力层，负责模型、检索、工具和工作流。
+- 前端只通过同源 `/api` 调用 FastAPI（2026-11 之前经 Java 主后端转发）。
+- FastAPI 同时承担对外接口、任务状态与本地持久化，智能能力（模型、检索、工具、工作流）在同一服务内分层实现。
 - 数据源必须通过 Data Provider 封装，避免业务逻辑绑定某个网站或 API。
 - 每个任务聊天框只做一个小功能，避免一次性大改。
 - 模型供应商和数据源通过独立接口接入，供工作台与未来研究 Skill 共用。

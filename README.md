@@ -27,7 +27,7 @@ Path of Market（市场之路）是一个基于大模型的个人财经研究工
 | 预算与多模型 | 调用 / token / 时间上限并为写作预留；服务商差异档案，`.env` 切换 DeepSeek / OpenAI 兼容接口 | [runtime.py](apps/agent/app/services/runtime.py) · [config.py](apps/agent/app/core/config.py) |
 | 记忆 | 跨研究的经历与主题观察；偏好须用户确认才生效 | [user_memory.py](apps/agent/app/services/user_memory.py) · [memory.py](apps/agent/app/storage/memory.py) |
 
-207 项离线测试（模型用脚本化假实现）+ 多家公司真实运行验收。
+220 项离线测试（模型用脚本化假实现）+ 多家公司真实运行验收。
 
 ## 特色：四个研究预兆
 
